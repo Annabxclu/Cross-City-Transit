@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
-<link rel="stylesheet" href="style.css?v=8">
+<link rel="stylesheet" href="style.css?v=9">
 <style>html{color-scheme:light}body{margin:0}:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}[hidden]{display:none!important}</style>
 </head>
 <body>
@@ -43,6 +43,7 @@
       <button id="zHome" aria-label="Center on home hub" style="font-size:12px">HQ</button>
       <button id="zArea" aria-label="Show whole job area" style="font-size:11px">ALL</button>
     </div>
+    <div id="placeBar" class="placebar" hidden></div>
     <div id="toasts" aria-live="polite"></div>
   </section>
   <aside class="panel">
@@ -62,12 +63,10 @@
   <form class="dialog" id="startForm">
     <div class="sign-strip"><div class="k">New company</div><div class="t">Start your freight line</div></div>
     <div class="body">
-      <p class="hint" style="color:var(--ink)">Pick where your first hub opens. Jobs show up around your hubs, and you grow from one van to a coast-to-coast fleet.</p>
+      <p class="hint" style="color:var(--ink)">Name your company and pick your home state. Jobs show up around your hubs, and you grow from one van to a coast-to-coast fleet.</p>
       <label class="fld">Company name<input type="text" id="coName" maxlength="32" value="Peach State Freight"></label>
-      <div class="startgrid">
-        <label class="fld">Home state<select id="stSel"></select></label>
-        <label class="fld">First hub<select id="ctSel"></select></label>
-      </div>
+      <label class="fld">Home state<select id="stSel"></select></label>
+      <p class="hint">Next you'll click the map to place your first hub. It's free.</p>
       <div class="kit"><div><span class="hint">Starting cash</span><b>$50,000</b></div><div><span class="hint">Starting vehicle</span><b>Cargo van</b></div><div><span class="hint">Driver</span><b>1 hired</b></div></div>
       <button class="btn" type="submit">Open for business</button>
     </div>
@@ -82,7 +81,7 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-<script src="data.js?v=8"></script>
-<script src="game.js?v=8"></script>
+<script src="data.js?v=9"></script>
+<script src="game.js?v=9"></script>
 </body>
 </html>

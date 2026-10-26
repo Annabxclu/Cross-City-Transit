@@ -90,15 +90,34 @@ const baseById = id => S.bases.find(b=>b.id===id);
 const hubCap = b => HUB_TIERS[b.tier||0].cap;
 const maxJobs = () => S.vehicles.length + 1;
 
-function newGame(co, cityIdx){
-  S = {v:2, company:co, homeState:CITIES[cityIdx].s, clock:0, lastReal:Date.now(), speed:1, cash:50000, xp:0,
-    earned:0, jobsDone:0, idc:0, payMult:1, bases:[], vehicles:[], drivers:[], jobs:[], trips:[], hired:0};
-  const c = CITIES[cityIdx];
-  const b = {id:nid("b"), city:cityIdx, pt:offsetPt(c.lat,c.lon,rnd(1,3),rnd(0,6.28)), tier:0, dispatcher:false, home:true};
+function newGame(co, stateCode, place){
+  S = {v:2, company:co, homeState:stateCode, clock:0, lastReal:Date.now(), speed:1, cash:50000, xp:0,
+    earned:0, jobsDone:0, idc:0, payMult:1, bases:[], vehicles:[], drivers:[], jobs:[], trips:[], hired:0, log:[]};
+  const b = {id:nid("b"), city:place.city, pt:place.pt, addr:place.addr, name:place.name||"HQ", tier:0, dispatcher:false, home:true};
   S.bases.push(b);
   S.drivers.push({id:nid("d"), name:`${pick(FIRST)} ${pick(LAST)}`, kind:"std", jobs:0, busy:false, hazmat:false, earned:0});
   S.vehicles.push({id:nid("v"), type:"van", base:b.id, n:"Van 1", busy:false, jobs:0});
   S.nextJobAt = JOB_EVERY_MS; spawnJob(b); spawnJob(b);
+}
+const baseName = b => b.name || (b.home ? "HQ" : "Hub");
+const baseAddr = b => b.addr || cityName(b.city);
+function nearestCity(p){ let best=0, bd=1e9; for(const c of CITIES){ const d=hav(p,c); if(d<bd){bd=d;best=c.i;} } return best; }
+const STATE_CODE = Object.fromEntries(Object.entries(STATES).map(([k,n])=>[n,k]));
+async function reverseGeocode(p){
+  try{
+    const ctl = new AbortController(); const tm = setTimeout(()=>ctl.abort(), 8000);
+    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=18&accept-language=en&lat=${p.lat}&lon=${p.lon}`, {signal:ctl.signal});
+    clearTimeout(tm);
+    if(!r.ok) throw 0;
+    const js = await r.json(), a = js.address || {};
+    const town = a.city || a.town || a.village || a.hamlet || a.suburb || a.county || "";
+    const st = STATE_CODE[a.state] || "";
+    const street = [a.house_number, a.road].filter(Boolean).join(" ");
+    return {line: [street, town && st ? `${town} ${st}` : (town||a.state||"")].filter(Boolean).join(", "), state: st, ok:true, us: a.country_code==="us"};
+  }catch(_){
+    const c = CITIES[nearestCity(p)];
+    return {line:`Near ${c.n} ${c.s}`, state:c.s, ok:false, us:true};
+  }
 }
 
 /* ---------------- Jobs ---------------- */
@@ -129,7 +148,8 @@ function spawnJob(base, depth=0){
     if(cand.length) dest = pick(cand).i;
   }
   const oc = CITIES[origin], dc = CITIES[dest];
-  const from = {c:origin, biz:pick(PRODUCERS[cargo]), ...offsetPt(oc.lat, oc.lon, rnd(0.5,4), rnd(0,6.28))};
+  const ctr = origin===base.city && base.pt ? base.pt : oc;
+  const from = {c:origin, biz:pick(PRODUCERS[cargo]), ...offsetPt(ctr.lat, ctr.lon, rnd(0.5,4), rnd(0,6.28))};
   from.name = bizName(from.biz); from.num = houseNo();
   let to;
   if(dest===origin){ to = {c:dest, ...offsetPt(from.lat, from.lon, rnd(4,22), rnd(0,6.28))}; }
@@ -304,14 +324,14 @@ const layerRings = L.layerGroup().addTo(map), layerRoutes = L.layerGroup().addTo
 const jobMarkers = new Map(), vehMarkers = new Map(), tripLines = new Map(), stopMarkers = new Map();
 const layerStops = L.layerGroup().addTo(map);
 const PIN_SVG = '<svg width="22" height="28" viewBox="0 0 22 28"><path class="body" d="M11 27C9 22 2 17 2 10.5A9 9 0 0 1 20 10.5C20 17 13 22 11 27Z"/><circle class="hole" cx="11" cy="10.5" r="3.4"/></svg>';
-map.on("click", ()=>{ if(selectedJob){ selectedJob=null; drawJobs(); renderPanel(); } });
+map.on("click", e=>{ if(placing){ placeAt(e.latlng); return; } if(selectedJob){ selectedJob=null; drawJobs(); renderPanel(); } });
 
 function drawBases(){
   layerBases.clearLayers(); layerRings.clearLayers();
   S.bases.forEach((b,i)=>{
     const p = basePt(b);
     L.circle([p.lat,p.lon], {radius:RADIUS_MI*1609.34, color:"#1e5a3c", weight:1.2, opacity:.5, dashArray:"5 6", fill:true, fillOpacity:.03, interactive:false}).addTo(layerRings);
-    L.marker([p.lat,p.lon], {icon:L.divIcon({className:"", html:`<div class="mk-base">${b.home?"HQ":"G"+(i+1)}</div>`, iconSize:[22,22], iconAnchor:[11,11]}), zIndexOffset:500, title:`${b.home?"HQ":"Hub"} · ${cityName(b.city)}`}).addTo(layerBases);
+    L.marker([p.lat,p.lon], {icon:L.divIcon({className:"", html:`<div class="mk-base">${b.home?"HQ":"H"+(i+1)}</div>`, iconSize:[22,22], iconAnchor:[11,11]}), zIndexOffset:500, title:`${baseName(b)} · ${baseAddr(b)}`}).addTo(layerBases);
   });
 }
 function drawJobs(){
@@ -487,7 +507,7 @@ function renderFleet(){
   let h = `<section class="sec"><div class="sec-head"><h2>Your fleet</h2><span class="hint num">${S.vehicles.length} vehicles</span></div><div class="list">`;
   for(const b of S.bases){
     const vs = S.vehicles.filter(v=>v.base===b.id);
-    h += `<h3>${b.home?"HQ":"Hub"} · ${esc(cityName(b.city))} <span class="num" style="letter-spacing:0">${vs.length}/${hubCap(b)}</span>${b.dispatcher?" · dispatcher on":""}</h3>`;
+    h += `<h3>${esc(baseName(b))} <span class="hint" style="text-transform:none;letter-spacing:0">${esc(baseAddr(b))}</span> <span class="num" style="letter-spacing:0">${vs.length}/${hubCap(b)}</span>${b.dispatcher?" · dispatcher on":""}</h3>`;
     for(const v of vs){
       const tr = S.trips.find(x=>x.v===v.id), ty = TYPE[v.type];
       const cap = ty.cars?`${ty.cap} cars`:`${ty.cap.toLocaleString("en-US")} lb`;
@@ -513,7 +533,7 @@ function renderFleet(){
 function renderShop(){
   const L_ = level();
   let h = `<section class="sec"><div class="sec-head"><h2>Trucks</h2><span class="hint">60% back when sold</span></div><div class="list">`;
-  const baseOpts = S.bases.map(b=>{const n=S.vehicles.filter(v=>v.base===b.id).length;return `<option value="${b.id}" ${n>=hubCap(b)?"disabled":""}>${esc(cityName(b.city))} (${n}/${hubCap(b)})</option>`;}).join("");
+  const baseOpts = S.bases.map(b=>{const n=S.vehicles.filter(v=>v.base===b.id).length;return `<option value="${b.id}" ${n>=hubCap(b)?"disabled":""}>${esc(baseName(b))} (${n}/${hubCap(b)})</option>`;}).join("");
   const anySlot = S.bases.some(b=>S.vehicles.filter(v=>v.base===b.id).length<hubCap(b));
   for(const t of TYPES){
     const locked = t.lvl>L_, poor = S.cash<t.price;
@@ -527,10 +547,11 @@ function renderShop(){
   h += `<section class="sec"><h2>Hubs</h2>
     <div class="card ${L_<GARAGE_LVL?"dim":""}"><div class="row"><b>Open a new hub</b><span class="num">${money(GARAGE_PRICE)}</span></div>
       <p class="hint">Opens a small hub (10 vehicles) with a ${RADIUS_MI}-mile job area. Own as many hubs as you like, even several in one city.</p>
-      ${L_<GARAGE_LVL?`<span class="lock">Unlocks at level ${GARAGE_LVL}</span>`:`<div class="btnrow"><select id="newGarage" aria-label="City for new hub" style="flex:1;min-width:0;width:auto">${cityOpts}</select><button class="btn sm" data-act="garage" ${S.cash<GARAGE_PRICE?"disabled":""}>Open</button></div>`}</div>
+      <div class="btnrow"><button class="btn sm" data-act="placeHub" ${S.cash<GARAGE_PRICE?"disabled":""}>${S.cash<GARAGE_PRICE?"Not enough cash":"Pick a spot on the map"}</button></div></div>
     ${S.bases.map(b=>{const t=b.tier||0, nx=HUB_TIERS[t+1], n=S.vehicles.filter(v=>v.base===b.id).length;
-      return `<div class="card"><div class="row"><b>${esc(cityName(b.city))}</b><span class="num">${n}/${hubCap(b)} vehicles</span></div>
-      <div class="meta"><span>${HUB_TIERS[t].n}</span></div>
+      return `<div class="card"><div class="row"><b>${esc(baseName(b))}</b><span class="num">${n}/${hubCap(b)} vehicles</span></div>
+      <div class="meta"><span>${esc(baseAddr(b))}</span><span>${HUB_TIERS[t].n}</span></div>
+      ${pendingConfirm===("renh"+b.id)?`<div class="btnrow"><input type="text" id="renh-${b.id}" maxlength="28" value="${esc(baseName(b))}" aria-label="New name for ${esc(baseName(b))}" style="flex:1;min-width:0;width:auto"><button class="btn sm" data-act="renHub" data-id="${b.id}">Save</button><button class="btn ghost sm" data-act="cancel">Cancel</button></div>`:`<div class="btnrow"><button class="btn ghost sm" data-act="askRenHub" data-id="${b.id}">Rename hub</button></div>`}
       <div class="btnrow">${!nx?`<span class="lock">Largest size</span>`:nx.lvl>L_?`<span class="lock">${nx.n} (${nx.cap} vehicles) unlocks at level ${nx.lvl}</span>`:`<button class="btn ghost sm" data-act="slot" data-id="${b.id}" ${S.cash<nx.price?"disabled":""}>Upgrade to ${nx.n} (${nx.cap} vehicles) · ${money(nx.price)}</button>`}</div></div>`;}).join("")}
   </section>
   <section class="sec"><h2>Coming next</h2>
@@ -555,7 +576,7 @@ function renderCrew(){
   }
   h += `</div></section><section class="sec"><h2>Dispatchers</h2><p class="hint">A dispatcher sends idle vehicles at one hub on the best-paying job they can take, even while you are away. Takes 5% of the jobs they assign.</p>`;
   if(L_<DISPATCH_LVL) h += `<div class="card dim"><span class="lock">Unlocks at level ${DISPATCH_LVL}</span></div>`;
-  else h += S.bases.map(b=>`<div class="card"><div class="row"><b>${esc(cityName(b.city))}</b><span class="status ${b.dispatcher?"idle":""}">${b.dispatcher?"Dispatcher on duty":"No dispatcher"}</span></div>
+  else h += S.bases.map(b=>`<div class="card"><div class="row"><b>${esc(baseName(b))}</b><span class="status ${b.dispatcher?"idle":""}">${b.dispatcher?"Dispatcher on duty":"No dispatcher"}</span></div>
       <div class="btnrow">${b.dispatcher?`<button class="btn ghost sm" data-act="disp" data-id="${b.id}">Let go</button>`:`<button class="btn sm" data-act="disp" data-id="${b.id}" ${S.cash<DISPATCH_PRICE?"disabled":""}>Hire · ${money(DISPATCH_PRICE)}</button>`}</div></div>`).join("");
   return h + `</section>`;
 }
@@ -645,14 +666,11 @@ $("#panelBody").addEventListener("click", e=>{
     toast(`Hired ${esc(name)}`); save(); refresh(); return;
   }
   if(a==="hazmat"){ const d=S.drivers.find(x=>x.id===id); if(d&&S.cash>=HAZMAT_PRICE){S.cash-=HAZMAT_PRICE;d.hazmat=true;save();refresh();} return; }
-  if(a==="garage"){
-    const c = +$("#newGarage").value; if(S.cash<GARAGE_PRICE||isNaN(c)) return;
-    S.cash -= GARAGE_PRICE;
-    const ct = CITIES[c], b = {id:nid("b"), city:c, pt:offsetPt(ct.lat,ct.lon,rnd(1,3),rnd(0,6.28)), tier:0, dispatcher:false, home:false};
-    S.bases.push(b);
-    toast(`Hub opened in ${esc(cityName(c))}`); drawBases(); map.flyTo([b.pt.lat,b.pt.lon], 10, {duration:.6}); save(); refresh(); return;
-  }
-  if(a==="slot"){ const b=baseById(id), nx=b&&HUB_TIERS[(b.tier||0)+1]; if(nx&&S.cash>=nx.price&&level()>=nx.lvl){S.cash-=nx.price;b.tier=(b.tier||0)+1;toast(`${esc(cityName(b.city))} is now a ${nx.n.toLowerCase()}`);save();refresh();} return; }
+  if(a==="placeHub"){ if(S.cash>=GARAGE_PRICE) startPlacement({first:false}); return; }
+  if(a==="askRenHub"){ pendingConfirm="renh"+id; renderPanel(); const inp=$("#renh-"+id); if(inp){ inp.focus(); inp.select(); } return; }
+  if(a==="renHub"){ const b=baseById(id), inp=$("#renh-"+id); const n=(inp?.value||"").trim().slice(0,28); if(b&&n&&n!==baseName(b)){ logEvent(`Renamed hub <b>${esc(baseName(b))}</b> to <b>${esc(n)}</b>`); b.name=n; save(); drawBases(); } pendingConfirm=null; refresh(); return; }
+
+  if(a==="slot"){ const b=baseById(id), nx=b&&HUB_TIERS[(b.tier||0)+1]; if(nx&&S.cash>=nx.price&&level()>=nx.lvl){S.cash-=nx.price;b.tier=(b.tier||0)+1;toast(`${esc(baseName(b))} is now a ${nx.n.toLowerCase()}`);save();refresh();} return; }
   if(a==="disp"){ const b=baseById(id); if(!b) return; if(b.dispatcher) b.dispatcher=false; else if(S.cash>=DISPATCH_PRICE){S.cash-=DISPATCH_PRICE;b.dispatcher=true;} save(); refresh(); return; }
   if(a==="askRen"){ pendingConfirm="ren"+id; renderPanel(); const inp=$("#ren-"+id); if(inp){ inp.focus(); inp.select(); } return; }
   if(a==="ren"){ const v=S.vehicles.find(x=>x.id===id), inp=$("#ren-"+id); const n=(inp?.value||"").trim().slice(0,24); if(v&&n&&n!==v.n){ logEvent(`Renamed <b>${esc(v.n)}</b> to <b>${esc(n)}</b>`); v.n=n; save(); } pendingConfirm=null; refresh(); return; }
@@ -665,10 +683,11 @@ $("#panelBody").addEventListener("click", e=>{
     try{localStorage.removeItem(KEY);}catch(_){}
     S=null; selectedJob=null; pendingConfirm=null; following=null;
     [layerJobs,layerBases,layerRings,layerVeh,layerRoutes,layerSel,layerStops].forEach(l=>l.clearLayers()); stopMarkers.clear(); jobMarkers.clear(); vehMarkers.clear(); tripLines.clear();
-    $("#panelBody").innerHTML=""; showStart(); return;
+    $("#panelBody").innerHTML=""; endPlacement(); showStart(); return;
   }
 });
-$("#panelBody").addEventListener("keydown", e=>{ if(e.key==="Enter" && e.target.id?.startsWith("ren-")){ e.preventDefault(); $(`[data-act=ren][data-id="${e.target.id.slice(4)}"]`)?.click(); } if(e.key==="Escape" && e.target.id?.startsWith("ren-")){ pendingConfirm=null; renderPanel(); } });
+$("#panelBody").addEventListener("keydown", e=>{ if(e.key==="Enter" && e.target.id?.startsWith("ren-")){ e.preventDefault(); $(`[data-act=ren][data-id="${e.target.id.slice(4)}"]`)?.click(); }
+  if(e.key==="Enter" && e.target.id?.startsWith("renh-")){ e.preventDefault(); $(`[data-act=renHub][data-id="${e.target.id.slice(5)}"]`)?.click(); } if(e.key==="Escape" && e.target.id?.startsWith("ren-")){ pendingConfirm=null; renderPanel(); } });
 $("#panelBody").addEventListener("change", e=>{ if(e.target.name==="veh") chosenVeh=e.target.value; });
 document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>setTab(b.dataset.tab)));
 
@@ -685,20 +704,78 @@ function refresh(){ drawJobs(); renderPanel(); }
 function showStart(){
   const ss = $("#stSel");
   ss.innerHTML = Object.entries(STATES).map(([k,n])=>`<option value="${k}" ${k==="GA"?"selected":""}>${n}</option>`).join("");
-  const fill = ()=>{ $("#ctSel").innerHTML = CITIES.filter(c=>c.s===ss.value).map(c=>`<option value="${c.i}">${esc(c.n)}</option>`).join(""); };
-  ss.onchange = fill; fill();
   $("#startOv").hidden = false;
   map.setView([38.5,-96], 4);
 }
 $("#startForm").addEventListener("submit", e=>{
   e.preventDefault();
-  newGame($("#coName").value.trim() || "Freight Co.", +$("#ctSel").value);
+  const co = $("#coName").value.trim() || "Freight Co.", st = $("#stSel").value;
   $("#startOv").hidden = true;
-  afterLoad();
-  const p = basePt(S.bases[0]); map.flyTo([p.lat,p.lon], 10, {duration:1.2});
-  toast(`${esc(S.drivers[0].name)} is waiting at HQ with your van. Pick a job to start earning.`, 5000);
-  save();
+  const cs = CITIES.filter(c=>c.s===st);
+  map.flyToBounds(L.latLngBounds(cs.map(c=>[c.lat,c.lon])).pad(0.25), {maxZoom:9, duration:1});
+  startPlacement({first:true, co, state:st});
 });
+
+/* ---------------- Placing a hub on the map ---------------- */
+let placing = null, placeMarker = null;
+function startPlacement(opts){
+  placing = {...opts, pt:null, info:null, looking:false};
+  document.querySelector(".mapwrap").classList.add("placing");
+  renderPlaceBar();
+}
+function endPlacement(){
+  placing = null; document.querySelector(".mapwrap").classList.remove("placing");
+  if(placeMarker){ map.removeLayer(placeMarker); placeMarker = null; }
+  $("#placeBar").hidden = true;
+}
+function placeAt(ll){
+  if(placing.looking) return;
+  placing.pt = {lat:+ll.lat.toFixed(5), lon:+ll.lng.toFixed(5)}; placing.info = null; placing.looking = true;
+  const icon = L.divIcon({className:"", html:'<div class="mk-newhub">HUB</div>', iconSize:[26,26], iconAnchor:[13,13]});
+  if(placeMarker) placeMarker.setLatLng(ll); else placeMarker = L.marker(ll, {icon, interactive:false, zIndexOffset:2000}).addTo(map);
+  renderPlaceBar();
+  reverseGeocode(placing.pt).then(info=>{ if(!placing) return; placing.info = info; placing.looking = false; renderPlaceBar(); });
+}
+function renderPlaceBar(){
+  const p = placing, bar = $("#placeBar"); if(!p){ bar.hidden = true; return; }
+  const stName = p.first ? STATES[p.state] : null;
+  const keepName = $("#hubName")?.value;
+  const defName = keepName || (p.first ? "HQ" : `Hub ${S ? S.bases.length+1 : 2}`);
+  let body;
+  if(!p.pt) body = `<p class="hint" style="color:var(--ink)">Click anywhere on the map${stName?` in ${esc(stName)}`:""} to place your ${p.first?"first ":""}hub. Zoom in to pick a street.</p>`;
+  else if(p.looking) body = `<p class="addr">Looking up the address…</p>`;
+  else {
+    const wrongState = p.first && p.info.state && p.info.state !== p.state;
+    const notUS = !p.info.us || !p.info.state;
+    const cost = p.first ? "Free" : money(GARAGE_PRICE);
+    body = `<p class="addr"><b>${esc(p.info.line)}</b></p>
+      ${notUS?`<p class="need" style="margin:0">Pick a spot in the lower 48 states.</p>`:wrongState?`<p class="need" style="margin:0">That spot is in ${esc(STATES[p.info.state]||p.info.state)}. Pick a spot in ${esc(stName)}, or start over to change your home state.</p>`:""}
+      <label class="fld">Hub name<input type="text" id="hubName" maxlength="28" value="${esc(defName)}"></label>
+      <div class="btnrow"><button class="btn" id="placeGo" ${wrongState||notUS?"disabled":""}>Build hub here · ${cost}</button><span class="hint">or click the map to move it</span></div>`;
+  }
+  bar.innerHTML = `<h2>${p.first?"Place your first hub":"Place a new hub"}</h2>${body}${p.first?"":`<div class="btnrow"><button class="btn ghost sm" id="placeCancel">Cancel</button></div>`}`;
+  bar.hidden = false;
+  $("#placeGo") && ($("#placeGo").onclick = buildHub);
+  $("#placeCancel") && ($("#placeCancel").onclick = endPlacement);
+}
+function buildHub(){
+  const p = placing; if(!p || !p.pt || !p.info) return;
+  const name = ($("#hubName")?.value || "").trim().slice(0,28) || (p.first ? "HQ" : `Hub ${S.bases.length+1}`);
+  const city = nearestCity(p.pt);
+  if(p.first){
+    endPlacement();
+    newGame(p.co, p.state, {pt:p.pt, addr:p.info.line, name, city});
+    afterLoad();
+    map.flyTo([p.pt.lat,p.pt.lon], 11, {duration:1});
+    toast(`${esc(name)} is open at ${esc(p.info.line)}. ${esc(S.drivers[0].name)} is waiting with your van.`, 6000);
+    save(); return;
+  }
+  if(S.cash < GARAGE_PRICE){ toast("Not enough cash for a new hub."); return; }
+  S.cash -= GARAGE_PRICE;
+  const b = {id:nid("b"), city, pt:p.pt, addr:p.info.line, name, tier:0, dispatcher:false, home:false};
+  S.bases.push(b); endPlacement();
+  toast(`Opened <b>${esc(name)}</b> at ${esc(p.info.line)}`); drawBases(); save(); refresh();
+}
 
 /* ---------------- Save / load ---------------- */
 function syncClock(){ const now=Date.now(); S.clock += (now-S.lastReal)*S.speed; S.lastReal = now; }
@@ -726,7 +803,7 @@ function start(){
   try{ const raw = localStorage.getItem(KEY); if(raw) loaded = JSON.parse(raw); }catch(_){}
   if(loaded && loaded.v===2){
     S = loaded;
-    S.bases.forEach(b=>{ if(b.tier==null) b.tier=0; delete b.slots; });
+    S.bases.forEach((b,i)=>{ if(b.tier==null) b.tier=0; delete b.slots; if(!b.name) b.name = b.home ? "HQ" : `Hub ${i+1}`; });
     S.jobs.forEach(j=>{ if(j.urg==="standard") j.expires=null; if(!j.from.name){ j.from.name=bizName(j.from.biz); j.from.num=houseNo(); j.to.name=bizName(j.to.biz); j.to.num=houseNo(); } });
     const dt = Date.now() - S.lastReal; let log = null;
     S.lastReal = Date.now();

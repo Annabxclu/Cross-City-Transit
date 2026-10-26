@@ -188,3 +188,10 @@ label.fld{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(
 .log li{display:grid;grid-template-columns:auto 1fr;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}
 .log time{color:var(--muted);font-size:11.5px;white-space:nowrap;padding-top:2px}
 .log li span{min-width:0}
+
+/* Hub placement */
+.placebar{position:absolute;z-index:700;left:50%;transform:translateX(-50%);top:56px;width:min(440px,calc(100% - 24px));background:var(--surface);border:2px solid var(--sign);border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.28);padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.placebar h2{font-size:17px}
+.placebar .addr{font-size:13.5px}
+.placing .leaflet-container{cursor:crosshair}
+.mk-newhub{width:26px;height:26px;border-radius:5px;background:var(--amber);color:#fff;border:2px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.5);display:grid;place-items:center;font-family:var(--display);font-weight:700;font-size:11px}
