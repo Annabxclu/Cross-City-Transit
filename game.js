@@ -1007,7 +1007,7 @@ function payBreakdown(j){
   const w = j.cargo==="vehicles" ? j.weight*4000 : j.weight;
   const dist = 1.5*j.miles*Math.pow(w/1000,0.8);
   const um = j.urg==="express"?1.8:j.urg==="priority"?1.3:1;
-  return `<p class="hint" style="margin:0">Pay: ${money(150*PAY_SCALE)} base + ${money(dist*PAY_SCALE)} for ${j.miles} mi × ${weightStr(j)} × ${CARGO[j.cargo].mult} ${esc(CARGO[j.cargo].n.toLowerCase())}${um>1?` × ${um} ${j.urg}`:""}${j.event?` × ${EVENT_PAY_BONUS} event bonus`:""}${j.rail?` × ${RAIL_PAY} rail rate`:""}</p>`;
+  return `<p class="hint" style="margin:0">Pay: ${money(150*PAY_SCALE)} base + ${money(dist*PAY_SCALE)} for ${j.miles} mi × ${weightStr(j)} × ${CARGO[j.cargo].mult} ${esc(CARGO[j.cargo].n.toLowerCase())}${um>1?` × ${um} ${j.urg}`:""}${j.event?` × ${EVENT_PAY_BONUS} event bonus`:""}${j.rail?` × ${RAIL_PAY} rail rate`:""}${j.air?` × ${AIR_PAY} air rate`:""}</p>`;
 }
 function dispatchCard(j){
   const st = jobStatus(j), local = j.from.c===j.to.c;
@@ -1016,7 +1016,7 @@ function dispatchCard(j){
     if(!chosenVeh || !st.opts.find(o=>o.v.id===chosenVeh)) chosenVeh = st.opts[0].v.id;
     opts = `<div class="opts">${st.opts.map(o=>{const p=o.r.plan;const net=Math.round(j.pay*p.bonus*(1-p.cut));
       return `<label class="opt"><input type="radio" name="veh" value="${o.v.id}" ${o.v.id===chosenVeh?"checked":""}>
-      <span><b>${esc(o.v.n)}</b> · ${esc(TYPE[o.v.type].n)}<small>${esc(o.r.drivers.map(d=>d.name).join(" + "))} · ${p.adding?`<b>Adds to its current trip</b> (${p.loads} loads, ${capText(o.v, j)}) · `:""}${p.dead>1?`${p.dead} mi to ${isTrain(o.v)?"the pickup yard":"pickup"} · `:""}${p.adding?"":`loading ${dur(p.ld)} · drive ${dur(p.tHaul)} · unloading ${dur(p.lu)}<br>`}Delivers this load in ${dur(p.deliverIn)}, back at ${isTrain(o.v)?"its yard":"the hub"} in ${dur(p.total)}${p.adding&&p.extra>0?` (+${dur(p.extra)})`:""}</small></span>
+      <span><b>${esc(o.v.n)}</b> · ${esc(TYPE[o.v.type].n)}<small>${esc(o.r.drivers.map(d=>d.name).join(" + "))} · ${p.adding?`<b>Adds to its current trip</b> (${p.loads} loads, ${capText(o.v, j)}) · `:""}${p.dead>1?`${p.dead} mi to ${isTrain(o.v)?"the pickup yard":isPlane(o.v)?"the pickup airport":"pickup"} · `:""}${p.adding?"":`loading ${dur(p.ld)} · ${isPlane(o.v)?"flight":"drive"} ${dur(p.tHaul)} · unloading ${dur(p.lu)}<br>`}Delivers this load in ${dur(p.deliverIn)}, back at ${isTrain(o.v)?"its yard":isPlane(o.v)?"its home airport":"the hub"} in ${dur(p.total)}${p.adding&&p.extra>0?` (+${dur(p.extra)})`:""}</small></span>
       <span class="pay" title="Job pay">${money(net)}</span></label>`;}).join("")}</div>
       <div class="btnrow"><button class="btn" data-act="go" data-id="${j.id}" ${j.routing?"disabled":""}>${j.routing?"Finding route…":"Dispatch"}</button><button class="btn ghost" data-act="unsel">Close</button></div>`;
   } else {
@@ -1025,7 +1025,7 @@ function dispatchCard(j){
   return `<section class="dispatch" aria-label="Dispatch job">
     <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${j.rail?`<span class="chip railchip"><i></i>Rail</span>`:""}${j.air?`<span class="chip airchip"><i></i>Air · ${esc(j.from.airport)} → ${esc(j.to.airport)}</span>`:""}${j.event?evChip(j):""}${cargoChip(j.cargo)}${urgTag(j.urg)}</div><span class="pay" style="font-size:18px">${money(j.pay)}</span></div>
     <div class="leg"><span class="dot"></span><span><b>${esc(j.from.name||j.from.biz)}</b> · ${esc(j.from.biz)}<br><span class="hint">${esc(addrLine(j.from))}</span></span>
-      <span class="line"></span><span class="hint"><span class="num">${weightStr(j)}</span> · <span class="num">${j.miles} mi</span> ${j.routing?(j.rail?"· checking track":"· checking roads"):j.path?(j.rail?"by rail":"by road"):"(estimate)"}</span>
+      <span class="line"></span><span class="hint"><span class="num">${weightStr(j)}</span> · <span class="num">${j.miles} mi</span> ${j.routing?(j.rail?"· checking track":"· checking roads"):j.path?(j.air?"by air":j.rail?"by rail":"by road"):"(estimate)"}</span>
       <span class="dot end"></span><span><b>${esc(j.to.name||j.to.biz)}</b> · ${esc(j.to.biz)}<br><span class="hint">${esc(addrLine(j.to))}</span></span></div>
     ${payBreakdown(j)}
     ${j.rail?railNeeds(j):""}
