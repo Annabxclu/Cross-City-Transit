@@ -992,10 +992,7 @@ function renderJobs(mode="truck"){
     h += `<p class="hint">Rail jobs run between real freight yards (square markers on the map). Intermodal legs 1 and 3 are truck jobs on the Truck jobs tab.</p>`;
   }
   if(!rail && S.jobsDone<1 && !sj) h += `<p class="hint" style="color:var(--ink)">Tap an orange pin on the map, or pick a job below, then send your van. Gray pins need a vehicle you do not own yet.</p>`;
-  if(!rail){ const L_=level(), need=xpNeed(L_+1), left=Math.max(0,Math.ceil((need-S.xp)*100)), nxt=Object.entries(UNLOCKS).find(([k])=>+k>L_);
-    h += `<section class="sec"><div class="sec-head"><h3>Level ${L_} → ${L_+1}</h3><span class="hint num">${Math.floor(S.xp-xpNeed(L_)).toLocaleString("en-US")} / ${(need-xpNeed(L_)).toLocaleString("en-US")} XP</span></div>
-      <div class="prog"><i style="width:${Math.min(100,(S.xp-xpNeed(L_))/(need-xpNeed(L_))*100)}%;background:var(--sign)"></i></div>
-      <p class="hint">${Math.ceil(need-S.xp).toLocaleString("en-US")} XP to level ${L_+1}. Each delivery earns 1 XP per $100 it pays.${nxt?` Next unlock: ${esc(nxt[1])} at level ${nxt[0]}.`:""} Board: ${boardCount()} of ${maxJobs()} jobs, a new one every ${JOB_EVERY_MS/1000} seconds.</p></section>`; }
+  if(!rail) h += `<p class="hint">Board: ${boardCount()} of ${maxJobs()} jobs. A new one posts every ${JOB_EVERY_MS/1000} seconds.</p>`;
   h += `<section class="sec"><div class="sec-head"><h2>Ready to run</h2><span class="hint num">${can.length}</span></div>${can.length?`<div class="list">${can.map(x=>jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. ${rail?"A new rail job posts as soon as a train is free.":"A new job posts every 30 seconds."}</p>`}</section>`;
   if(cant.length) h += `<section class="sec"><div class="sec-head"><h2>Other jobs nearby</h2><span class="hint num">${cant.length}</span></div><div class="list">${cant.map(x=>jobCard(x.j)).join("")}</div></section>`;
   if(waiting.length) h += `<section class="sec"><div class="sec-head"><h2>Next intermodal legs</h2><span class="hint num">${waiting.length}</span></div><p class="hint">Each opens when the leg before it is delivered. Finish all three for a ${CHAIN_BONUS*100}% bonus.</p><div class="list">${waiting.map(x=>jobCard(x.j)).join("")}</div></section>`;
@@ -1153,9 +1150,15 @@ function renderLog(){
     <p class="hint">Everything your company does: new jobs, dispatches, pickups, deliveries, purchases and level-ups. Newest first, last 20 kept.</p>
     ${items.length?`<ol class="log">${items.map(e=>`<li><time class="num">${fmt(e.t)}</time><span>${e.h}</span></li>`).join("")}</ol>`:`<p class="hint">Nothing yet. Dispatch a job and it shows up here.</p>`}</section>`;
 }
+function levelBar(){
+  const L_ = level(), need = xpNeed(L_+1), nxt = Object.entries(UNLOCKS).find(([k])=>+k>L_);
+  return `<section class="sec"><div class="sec-head"><h3>Level ${L_} → ${L_+1}</h3><span class="hint num">${Math.floor(S.xp-xpNeed(L_)).toLocaleString("en-US")} / ${(need-xpNeed(L_)).toLocaleString("en-US")} XP</span></div>
+    <div class="prog"><i style="width:${Math.min(100,(S.xp-xpNeed(L_))/(need-xpNeed(L_))*100)}%;background:var(--sign)"></i></div>
+    <p class="hint">${Math.ceil(need-S.xp).toLocaleString("en-US")} XP to level ${L_+1}. Each delivery earns 1 XP per $100 it pays.${nxt?` Next unlock: ${esc(nxt[1])} at level ${nxt[0]}.`:""}</p></section>`;
+}
 function renderCompany(){
   const L_ = level(), reset = pendingConfirm==="reset";
-  return `<section class="sec"><h2>${esc(S.company)}</h2>
+  return `<section class="sec"><h2>${esc(S.company)}</h2></section>${levelBar()}<section class="sec">
     <table class="spec"><tbody>
       <tr><td>Level</td><td>${L_}</td></tr>
       <tr><td>Total XP</td><td>${Math.floor(S.xp).toLocaleString("en-US")}</td></tr>
