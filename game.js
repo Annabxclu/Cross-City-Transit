@@ -125,7 +125,7 @@ const citiesNear = (ci, maxMi) => CITIES.filter(c=>roadMi(ci,c.i)<=maxMi).map(c=
 function spawnJob(base, depth=0){
   const L = level();
   const ownedTypes = [...new Set(S.vehicles.map(v=>v.type))];
-  const reach = TYPES.filter(t=>t.lvl<=L+4);
+  const reach = TYPES.filter(t=>t.lvl<=L);   // only vehicles you can already buy
   // Keep the board useful: while fewer jobs fit your fleet than you have vehicles, only post jobs you can run.
   const fitting = S.jobs.filter(x=>S.vehicles.some(v=>{const tt=TYPE[v.type];return tt.cargo.includes(x.cargo)&&tt.cap>=x.weight&&tt.leg>=x.miles;})).length;
   const ownOnly = fitting < S.vehicles.length;
@@ -164,6 +164,8 @@ function spawnJob(base, depth=0){
   return j;
 }
 // Fetch the real road route for a job, then quote it by road miles.
+// A job is only worth posting if some vehicle you can already buy could run it.
+const fitsUnlocked = j => TYPES.some(t=>t.lvl<=level() && t.cargo.includes(j.cargo) && t.cap>=j.weight && t.leg>=j.miles);
 function routeJob(j){
   if(j.routed || j.routing) return;
   j.routing = true;
@@ -176,6 +178,8 @@ function routeJob(j){
       if(r.locs && r.locs.length===2){ Object.assign(j.from, r.locs[0]); Object.assign(j.to, r.locs[1]); }
       if(r.names){ j.from.street = r.names[0]; j.to.street = r.names[1]; }
       const m = jobMarkers.get(j.id); if(m) m.setLatLng([j.from.lat, j.from.lon]);
+      // Real road miles can run past what any unlocked vehicle can reach; swap it for a new job.
+      if(!fitsUnlocked(j)){ S.jobs = S.jobs.filter(x=>x!==j); if(selectedJob===j.id) selectedJob=null; spawnJob(pick(S.bases)); drawJobs(); renderPanel(); return; }
     }
     if(j.id===selectedJob) drawSelection();
     if(tab==="jobs") renderPanel();
@@ -866,6 +870,7 @@ function start(){
   if(loaded && loaded.v===2){
     S = loaded;
     S.bases.forEach((b,i)=>{ if(b.tier==null) b.tier=0; delete b.slots; if(!b.name) b.name = b.home ? "HQ" : `Hub ${i+1}`; });
+    S.jobs = S.jobs.filter(fitsUnlocked);
     S.jobs.forEach(j=>{ j.pay = payFor(j.miles, j.weight, j.cargo, j.urg); if(j.urg==="standard") j.expires=null; if(!j.from.name){ j.from.name=bizName(j.from.biz); j.from.num=houseNo(); j.to.name=bizName(j.to.biz); j.to.num=houseNo(); } });
     const dt = Date.now() - S.lastReal; let log = null;
     S.lastReal = Date.now();
