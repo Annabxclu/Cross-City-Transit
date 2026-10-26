@@ -1339,7 +1339,6 @@ function renderHeader(){
   $("#hdrCash").textContent = money(S.cash);
   $("#hdrLvl").textContent = `Level ${L_} · ${Math.floor(S.xp-a).toLocaleString("en-US")}/${(b-a).toLocaleString("en-US")} XP`;
   $("#hdrXp").style.width = (L_>=50?100:Math.min(100,(S.xp-a)/(b-a)*100)) + "%";
-  $("#hdrTrips").textContent = S.trips.length;
   // Each job tab shows how many jobs are ready to run right now (shown once that kind of job is unlocked).
   for(const [id, kind, lvl] of [["#jobBadge","truck",1], ["#railBadge","rail",RAIL_LVL], ["#airBadge","air",AIR_LVL]]){
     const b = $(id); b.textContent = S.jobs.filter(j=>jobKind(j)===kind && jobStatus(j).can).length; b.hidden = level() < lvl;
@@ -1446,7 +1445,7 @@ $("#panelBody").addEventListener("click", e=>{
     try{localStorage.removeItem(KEY);}catch(_){}
     S=null; selectedJob=null; pendingConfirm=null; following=null;
     [layerJobs,layerBases,layerRings,layerVeh,layerRoutes,layerSel,layerStops].forEach(l=>l.clearLayers()); stopMarkers.clear(); jobMarkers.clear(); vehMarkers.clear(); tripLines.clear();
-    $("#panelBody").innerHTML=""; $("#hdrCash").textContent="$0"; $("#hdrLvl").textContent="Level 1"; $("#hdrXp").style.width="0%"; $("#hdrTrips").textContent="0"; $("#jobBadge").textContent="0"; $("#hdrCo").textContent="New company"; endPlacement(); showStart(); return;
+    $("#panelBody").innerHTML=""; $("#hdrCash").textContent="$0"; $("#hdrLvl").textContent="Level 1"; $("#hdrXp").style.width="0%"; $("#jobBadge").textContent="0"; $("#hdrCo").textContent="New company"; endPlacement(); showStart(); return;
   }
 });
 $("#panelBody").addEventListener("keydown", e=>{ if(e.key==="Enter" && e.target.id?.startsWith("ren-")){ e.preventDefault(); $(`[data-act=ren][data-id="${e.target.id.slice(4)}"]`)?.click(); }
