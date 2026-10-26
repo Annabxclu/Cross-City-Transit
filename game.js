@@ -757,6 +757,13 @@ function frame(){
   }
   requestAnimationFrame(frame);
 }
+// Map key: click to hide or show; remembered in this browser.
+(()=>{ const lg = $("#legend"), bt = $("#legendToggle"), small = () => matchMedia("(max-width:620px)").matches;
+  const set = open => { lg.classList.toggle("min", !open); lg.classList.toggle("open-small", open); bt.setAttribute("aria-expanded", open); bt.title = open ? "Hide map key" : "Show map key"; bt.lastElementChild.textContent = open ? "‹" : "›"; };
+  let open = !small(); try{ const v = localStorage.getItem("freight-dispatch-key"); if(v) open = v==="open"; }catch(_){}
+  set(open);
+  bt.addEventListener("click", ()=>{ open = !open; set(open); try{ localStorage.setItem("freight-dispatch-key", open?"open":"closed"); }catch(_){} });
+})();
 $("#zHome").onclick=()=>{ if(S){ const p=basePt(S.bases[0]); map.flyTo([p.lat,p.lon], 11, {duration:.6}); } };
 $("#zArea").onclick=()=>{ if(S){ const b=L.latLngBounds(S.bases.map(x=>{const p=basePt(x);return [p.lat,p.lon];})); map.flyToBounds(b.pad(0.1).extend(L.latLng(b.getNorth()+RADIUS_MI/MI_DEG, b.getEast()+RADIUS_MI/MI_DEG)).extend(L.latLng(b.getSouth()-RADIUS_MI/MI_DEG, b.getWest()-RADIUS_MI/MI_DEG)), {duration:.6}); } };
 
