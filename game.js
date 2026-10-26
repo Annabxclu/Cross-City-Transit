@@ -389,9 +389,9 @@ function frame(){
       const p = posOf(tr,t);
       let m = vehMarkers.get(tr.id);
       const v = S.vehicles.find(x=>x.id===tr.v);
-      const label = v ? v.n.replace(/[^0-9]/g,"").slice(-2) : "";
+      const mode = v ? (TYPE[v.type]?.mode||"truck") : "truck";
       if(!m){
-        m = L.marker(p.ll, {icon:L.divIcon({className:"", html:`<div class="mk-veh ${p.ph}">${label}</div>`, iconSize:[18,18], iconAnchor:[9,9]}), zIndexOffset:800, title:v?v.n:"Truck"});
+        m = L.marker(p.ll, {icon:L.divIcon({className:"", html:`<div class="mk-veh ${p.ph}">${iconSvg(mode,15)}</div>`, iconSize:[26,26], iconAnchor:[13,13]}), zIndexOffset:800, title:v?`${v.n} · ${TYPE[v.type]?.n||""}`:"Truck"});
         m.on("click", e=>{ L.DomEvent.stopPropagation(e); setTab("fleet"); });
         m.addTo(layerVeh); vehMarkers.set(tr.id, m); m._ph = p.ph;
       } else {
@@ -490,9 +490,9 @@ function renderJobs(){
   if(sj) h += dispatchCard(sj);
   if(S.jobsDone<1 && !sj) h += `<p class="hint" style="color:var(--ink)">Tap an orange pin on the map, or pick a job below, then send your van. Gray pins need a vehicle you do not own yet.</p>`;
   { const L_=level(), need=xpNeed(L_+1), left=Math.max(0,Math.ceil((need-S.xp)*100)), nxt=Object.entries(UNLOCKS).find(([k])=>+k>L_);
-    h += `<section class="sec"><div class="sec-head"><h3>Level ${L_} → ${L_+1}</h3><span class="hint num">${money(left)} to go</span></div>
+    h += `<section class="sec"><div class="sec-head"><h3>Level ${L_} → ${L_+1}</h3><span class="hint num">${Math.floor(S.xp-xpNeed(L_)).toLocaleString("en-US")} / ${(need-xpNeed(L_)).toLocaleString("en-US")} XP</span></div>
       <div class="prog"><i style="width:${Math.min(100,(S.xp-xpNeed(L_))/(need-xpNeed(L_))*100)}%;background:var(--sign)"></i></div>
-      <p class="hint">Every $100 of delivery pay earns 1 XP.${nxt?` Next unlock: ${esc(nxt[1])} at level ${nxt[0]}.`:""} Board: ${S.jobs.length} of ${maxJobs()} jobs, a new one every ${JOB_EVERY_MS/1000} seconds.</p></section>`; }
+      <p class="hint">${Math.ceil(need-S.xp).toLocaleString("en-US")} XP to level ${L_+1}. Each delivery earns 1 XP per $100 it pays.${nxt?` Next unlock: ${esc(nxt[1])} at level ${nxt[0]}.`:""} Board: ${S.jobs.length} of ${maxJobs()} jobs, a new one every ${JOB_EVERY_MS/1000} seconds.</p></section>`; }
   if(open.length) h += `<section class="sec"><h3>Next goals</h3><ul class="goals">${open.map(x=>`<li>${esc(x[0])}</li>`).join("")}</ul></section>`;
   h += `<section class="sec"><div class="sec-head"><h2>Ready to run</h2><span class="hint num">${can.length}</span></div>${can.length?`<div class="list">${can.map(x=>jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. A new job posts every 30 seconds.</p>`}</section>`;
   if(cant.length) h += `<section class="sec"><div class="sec-head"><h2>Other jobs nearby</h2><span class="hint num">${cant.length}</span></div><div class="list">${cant.map(x=>jobCard(x.j)).join("")}</div></section>`;
@@ -514,14 +514,14 @@ function renderFleet(){
       if(tr){
         const pct = Math.min(100,(t-tr.segs[0].t0)/(tr.endAt-tr.segs[0].t0)*100);
         const ds = tr.drivers.map(id=>S.drivers.find(d=>d.id===id)?.name).join(" + ");
-        h += `<div class="card"><div class="row"><b>${esc(v.n)}</b><span class="status busy" data-ph="${tr.id}">${phaseText(tr,t)}</span></div>
+        h += `<div class="card"><div class="row"><b><span class="vic">${iconSvg(TYPE[v.type].mode,13)}</span>${esc(v.n)}</b><span class="status busy" data-ph="${tr.id}">${phaseText(tr,t)}</span></div>
           <div class="route">${esc(cityName(tr.job.from.c))} <span class="arrow">→</span> ${esc(cityName(tr.job.to.c))} · ${esc(ds)}</div>
           <div class="prog"><i data-prog="${tr.id}" style="width:${pct}%"></i></div>
           <div class="meta"><span>${tr.delivered?"Delivered, home in":"Delivers in"} <span class="num" data-eta="${tr.id}">${dur((tr.delivered?tr.endAt:tr.deliverAt)-t)}</span></span><span class="num">${money(tr.gross*(1-tr.cut))}</span></div>
           <div class="btnrow"><button class="btn ghost sm" data-act="follow" data-id="${tr.id}">Follow on map</button><button class="btn ghost sm" data-act="askRen" data-id="${v.id}">Rename</button></div>${pendingConfirm===("ren"+v.id)?`<div class="btnrow"><input type="text" id="ren-${v.id}" maxlength="24" value="${esc(v.n)}" aria-label="New name for ${esc(v.n)}" style="flex:1;min-width:0;width:auto"><button class="btn sm" data-act="ren" data-id="${v.id}">Save</button><button class="btn ghost sm" data-act="cancel">Cancel</button></div>`:""}</div>`;
       } else {
         const confirm = pendingConfirm===("sell"+v.id);
-        h += `<div class="card"><div class="row"><b>${esc(v.n)}</b><span class="status idle">Idle</span></div>
+        h += `<div class="card"><div class="row"><b><span class="vic">${iconSvg(TYPE[v.type].mode,13)}</span>${esc(v.n)}</b><span class="status idle">Idle</span></div>
           <div class="meta"><span>${esc(ty.n)}</span><span class="num">${cap}</span><span class="num">${ty.leg} mi range</span><span>${v.jobs} jobs</span></div>
           <div class="btnrow"><button class="btn ghost sm" data-act="askRen" data-id="${v.id}">Rename</button>${S.vehicles.length>1&&!confirm?`<button class="btn ghost sm" data-act="askSell" data-id="${v.id}">Sell</button>`:""}</div>${pendingConfirm===("ren"+v.id)?`<div class="btnrow"><input type="text" id="ren-${v.id}" maxlength="24" value="${esc(v.n)}" aria-label="New name for ${esc(v.n)}" style="flex:1;min-width:0;width:auto"><button class="btn sm" data-act="ren" data-id="${v.id}">Save</button><button class="btn ghost sm" data-act="cancel">Cancel</button></div>`:""}
           ${S.vehicles.length>1&&confirm?`<div class="btnrow">${confirm?`<button class="btn warn sm" data-act="sell" data-id="${v.id}">Sell for ${money(ty.price*0.6)}</button><button class="btn ghost sm" data-act="cancel">Keep it</button>`:`<button class="btn ghost sm" data-act="askSell" data-id="${v.id}">Sell</button>`}</div>`:""}</div>`;
@@ -537,7 +537,7 @@ function renderShop(){
   const anySlot = S.bases.some(b=>S.vehicles.filter(v=>v.base===b.id).length<hubCap(b));
   for(const t of TYPES){
     const locked = t.lvl>L_, poor = S.cash<t.price;
-    h += `<div class="card ${locked?"dim":""}"><div class="row"><b>${esc(t.n)}</b><span class="num">${money(t.price)}</span></div>
+    h += `<div class="card ${locked?"dim":""}"><div class="row"><b><span class="vic">${iconSvg(t.mode,13)}</span>${esc(t.n)}</b><span class="num">${money(t.price)}</span></div>
       <div class="meta"><span class="num">${t.cars?t.cap+" cars":t.cap.toLocaleString("en-US")+" lb"}</span><span class="num">${t.leg} mi range</span><span>${t.cargo.map(c=>CARGO[c].n).join(", ")}</span><span>${t.lic==="std"?"Any driver":t.lic==="cdl"?"CDL driver":"2 CDL drivers"}</span></div>
       ${locked?`<span class="lock">Unlocks at level ${t.lvl}</span>`:`<div class="btnrow"><select aria-label="Hub for ${esc(t.n)}" id="bs-${t.id}" style="width:auto;flex:1;min-width:0">${baseOpts}</select><button class="btn sm" data-act="buy" data-id="${t.id}" ${poor||!anySlot?"disabled":""}>${poor?"Not enough cash":!anySlot?"Hubs full":"Buy"}</button></div>`}</div>`;
   }
@@ -592,13 +592,18 @@ function renderCompany(){
   return `<section class="sec"><h2>${esc(S.company)}</h2>
     <table class="spec"><tbody>
       <tr><td>Level</td><td>${L_}</td></tr>
-      <tr><td>XP</td><td>${Math.floor(S.xp).toLocaleString("en-US")} / ${xpNeed(L_+1).toLocaleString("en-US")}</td></tr>
+      <tr><td>Total XP</td><td>${Math.floor(S.xp).toLocaleString("en-US")}</td></tr>
+      <tr><td>XP to level ${L_+1}</td><td>${Math.ceil(xpNeed(L_+1)-S.xp).toLocaleString("en-US")}</td></tr>
       <tr><td>Next unlock</td><td style="font-family:var(--body)">${esc(Object.entries(UNLOCKS).find(([k])=>+k>L_)?.[1]||"All unlocked")}</td></tr>
       <tr><td>Deliveries</td><td>${S.jobsDone.toLocaleString("en-US")}</td></tr>
       <tr><td>Earned after driver pay</td><td>${money(S.earned)}</td></tr>
       <tr><td>Hubs</td><td>${S.bases.length}</td></tr>
       <tr><td>Home state</td><td style="font-family:var(--body)">${STATES[S.homeState]}</td></tr>
     </tbody></table></section>
+    <section class="sec"><h3>XP needed for each level</h3>
+      <div style="overflow-x:auto"><table class="spec lvtab"><thead><tr><td>Level</td><td>XP for this level</td><td>Total XP</td><td>Unlocks</td></tr></thead><tbody>
+      ${[...Array(29)].map((_,i)=>i+2).concat([35,40,45,50]).map(L=>`<tr class="${L===L_+1?"next":""} ${L<=L_?"done":""}"><td>${L}</td><td>${(xpNeed(L)-xpNeed(L-1)).toLocaleString("en-US")}</td><td>${xpNeed(L).toLocaleString("en-US")}</td><td>${esc(UNLOCKS[L]||"")}</td></tr>`).join("")}
+      </tbody></table></div></section>
     <section class="sec"><h3>Goals</h3><ul class="goals">${goals().map(x=>`<li class="${x[1]?"done":""}">${esc(x[0])}</li>`).join("")}</ul></section>
     <section class="sec"><h3>Clock speed</h3><p class="hint">Speeds up every trip. Handy for testing the economy; away time always counts at normal speed.</p>
       <div class="seg" role="group" aria-label="Clock speed">${[1,3,10].map(s=>`<button data-act="speed" data-s="${s}" aria-pressed="${S.speed===s}">${s}×</button>`).join("")}</div></section>
@@ -609,7 +614,7 @@ function renderHeader(){
   const L_ = level(), a = xpNeed(L_), b = xpNeed(L_+1);
   $("#hdrCo").textContent = S.company;
   $("#hdrCash").textContent = money(S.cash);
-  $("#hdrLvl").textContent = "Level " + L_;
+  $("#hdrLvl").textContent = `Level ${L_} · ${Math.floor(S.xp-a).toLocaleString("en-US")}/${(b-a).toLocaleString("en-US")} XP`;
   $("#hdrXp").style.width = (L_>=50?100:Math.min(100,(S.xp-a)/(b-a)*100)) + "%";
   $("#hdrTrips").textContent = S.trips.length;
   $("#jobBadge").textContent = S.jobs.filter(j=>jobStatus(j).can).length;
