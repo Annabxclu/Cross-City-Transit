@@ -192,7 +192,7 @@ function vehicleFor(v, j){
   if(!t.cargo.includes(j.cargo)) return {ok:false, why:"Wrong trailer"};
   if(j.weight > t.cap) return {ok:false, why:"Too heavy"};
   if(j.miles > t.leg) return {ok:false, why:`Over ${t.leg} mi range`};
-  if(estMi(basePt(baseById(v.base)), j.from) > MAX_DEADHEAD) return {ok:false, why:"Garage too far"};
+  if(estMi(basePt(baseById(v.base)), j.from) > MAX_DEADHEAD) return {ok:false, why:"Hub too far"};
   if(v.busy) return {ok:false, why:"On a job", busy:true};
   const ds = freeDrivers(t.lic, j.cargo);
   if(!ds) return {ok:false, why: t.lic==="std"?"No free driver": j.cargo==="hazmat"?"Needs hazmat driver": t.lic==="cdl2"?"Needs 2 free CDL drivers":"No free CDL driver", nodriver:true};
@@ -235,7 +235,8 @@ function roadTrip(tr){
     getRoute(a,b).then(r=>{ if(r && S && S.trips.includes(tr)){ s.path = r.path; s.cum = null; tripLines.get(tr.id)?.setLatLngs([]); } });
   }
 }
-let awayLog = null, simulating = false;
+let awayLog = null, simulating = false, simT = 0;
+const simWhen = () => awayLog ? awayLog.start + simT : Date.now();
 function deliver(tr){
   tr.delivered = true;
   const net = tr.gross*(1-tr.cut)*S.payMult;
@@ -243,10 +244,10 @@ function deliver(tr){
   S.cash += net; S.earned += net; S.xp += tr.gross/100; S.jobsDone++;
   const v = S.vehicles.find(x=>x.id===tr.v); if(v) v.jobs++;
   tr.drivers.forEach(id=>{const d=S.drivers.find(x=>x.id===id); if(d){d.jobs++; d.earned+=tr.gross*DRIVER_KIND[d.kind].cut;}});
-  if(awayLog){awayLog.jobs++; awayLog.net+=net;}
-  else toast(`<b>${esc(v?v.n:"Truck")}</b> delivered ${esc(CARGO[tr.job.cargo].n.toLowerCase())} to ${esc(cityName(tr.job.to.c))} <span class="num">+${money(net)}</span>`);
+  if(awayLog){awayLog.jobs++; awayLog.net+=net; logEvent(`<b>${esc(v?v.n:"Truck")}</b> delivered ${esc(CARGO[tr.job.cargo].n.toLowerCase())} to ${esc(tr.job.to.name||cityName(tr.job.to.c))} <span class="num">+${money(net)}</span> (while you were away)`, simWhen());}
+  else toast(`<b>${esc(v?v.n:"Truck")}</b> delivered ${esc(CARGO[tr.job.cargo].n.toLowerCase())} to ${esc(tr.job.to.name||tr.job.to.biz)}, ${esc(cityName(tr.job.to.c))} <span class="num">+${money(net)}</span>`);
   const after = level();
-  for(let L=before+1;L<=after;L++){ if(awayLog) awayLog.levels.push(L); else toast(`<b>Level ${L}</b>${UNLOCKS[L]?` · unlocked ${esc(UNLOCKS[L])}`:""}`, 6000); }
+  for(let L=before+1;L<=after;L++){ if(awayLog){ awayLog.levels.push(L); logEvent(`<b>Level ${L}</b>${UNLOCKS[L]?` · unlocked ${esc(UNLOCKS[L])}`:""}`, simWhen()); } else toast(`<b>Level ${L}</b>${UNLOCKS[L]?` · unlocked ${esc(UNLOCKS[L])}`:""}`, 6000); }
 }
 function logic(){
   let changed = false;
@@ -284,9 +285,9 @@ function logic(){
 }
 function simulateAway(ms){
   ms = Math.min(ms, 12*3600e3);
-  awayLog = {jobs:0, net:0, levels:[], ms}; simulating = true;
+  awayLog = {jobs:0, net:0, levels:[], ms, start: Date.now()-ms}; simulating = true; simT = 0;
   let t = 0;
-  while(t < ms){ S.payMult = t > 4*3600e3 ? 0.5 : 1; const d = Math.min(15000, ms-t); S.clock += d; t += d; logic(); }
+  while(t < ms){ S.payMult = t > 4*3600e3 ? 0.5 : 1; const d = Math.min(15000, ms-t); S.clock += d; t += d; simT = t; logic(); }
   S.payMult = 1; simulating = false;
   S.trips.forEach(roadTrip);
   const log = awayLog; awayLog = null; return log;
@@ -310,7 +311,7 @@ function drawBases(){
   S.bases.forEach((b,i)=>{
     const p = basePt(b);
     L.circle([p.lat,p.lon], {radius:RADIUS_MI*1609.34, color:"#1e5a3c", weight:1.2, opacity:.5, dashArray:"5 6", fill:true, fillOpacity:.03, interactive:false}).addTo(layerRings);
-    L.marker([p.lat,p.lon], {icon:L.divIcon({className:"", html:`<div class="mk-base">${b.home?"HQ":"G"+(i+1)}</div>`, iconSize:[22,22], iconAnchor:[11,11]}), zIndexOffset:500, title:`${b.home?"HQ":"Garage"} · ${cityName(b.city)}`}).addTo(layerBases);
+    L.marker([p.lat,p.lon], {icon:L.divIcon({className:"", html:`<div class="mk-base">${b.home?"HQ":"G"+(i+1)}</div>`, iconSize:[22,22], iconAnchor:[11,11]}), zIndexOffset:500, title:`${b.home?"HQ":"Hub"} · ${cityName(b.city)}`}).addTo(layerBases);
   });
 }
 function drawJobs(){
@@ -425,7 +426,7 @@ function goals(){
   return [
     ["Deliver your first job", S.jobsDone>=1], ["Complete 5 deliveries", S.jobsDone>=5],
     ["Buy a second vehicle", S.vehicles.length>=2], ["Hire your first driver", S.hired>=1],
-    ["Reach level 3 and open a second garage", S.bases.length>=2], ["Buy a straight truck (level 6)", has("straight")],
+    ["Open a second hub", S.bases.length>=2], ["Buy a straight truck (level 6)", has("straight")],
     ["Hire a dispatcher (level 8)", S.bases.some(b=>b.dispatcher)], ["Put a semi on the road (level 10)", S.vehicles.some(v=>TYPE[v.type].lvl>=10)]
   ];
 }
@@ -479,14 +480,14 @@ function renderJobs(){
 }
 function phaseText(tr,t){
   const p=segAt(tr,t).ph, f=tr.job.from.name||tr.job.from.biz, d=tr.job.to.name||tr.job.to.biz;
-  return p==="dead"?`Heading to pickup at ${f}`:p==="load"?(t<tr.segs[2].t0?`Loading at ${f}`:`Unloading at ${d}`):p==="haul"?`Loaded, delivering to ${d}`:"Empty, returning to garage";
+  return p==="dead"?`Heading to pickup at ${f}`:p==="load"?(t<tr.segs[2].t0?`Loading at ${f}`:`Unloading at ${d}`):p==="haul"?`Loaded, delivering to ${d}`:"Empty, returning to hub";
 }
 function renderFleet(){
   const t = displayClock();
   let h = `<section class="sec"><div class="sec-head"><h2>Your fleet</h2><span class="hint num">${S.vehicles.length} vehicles</span></div><div class="list">`;
   for(const b of S.bases){
     const vs = S.vehicles.filter(v=>v.base===b.id);
-    h += `<h3>${b.home?"HQ":"Garage"} · ${esc(cityName(b.city))} <span class="num" style="letter-spacing:0">${vs.length}/${hubCap(b)}</span>${b.dispatcher?" · dispatcher on":""}</h3>`;
+    h += `<h3>${b.home?"HQ":"Hub"} · ${esc(cityName(b.city))} <span class="num" style="letter-spacing:0">${vs.length}/${hubCap(b)}</span>${b.dispatcher?" · dispatcher on":""}</h3>`;
     for(const v of vs){
       const tr = S.trips.find(x=>x.v===v.id), ty = TYPE[v.type];
       const cap = ty.cars?`${ty.cap} cars`:`${ty.cap.toLocaleString("en-US")} lb`;
@@ -497,12 +498,13 @@ function renderFleet(){
           <div class="route">${esc(cityName(tr.job.from.c))} <span class="arrow">→</span> ${esc(cityName(tr.job.to.c))} · ${esc(ds)}</div>
           <div class="prog"><i data-prog="${tr.id}" style="width:${pct}%"></i></div>
           <div class="meta"><span>${tr.delivered?"Delivered, home in":"Delivers in"} <span class="num" data-eta="${tr.id}">${dur((tr.delivered?tr.endAt:tr.deliverAt)-t)}</span></span><span class="num">${money(tr.gross*(1-tr.cut))}</span></div>
-          <div class="btnrow"><button class="btn ghost sm" data-act="follow" data-id="${tr.id}">Follow on map</button></div></div>`;
+          <div class="btnrow"><button class="btn ghost sm" data-act="follow" data-id="${tr.id}">Follow on map</button><button class="btn ghost sm" data-act="askRen" data-id="${v.id}">Rename</button></div>${pendingConfirm===("ren"+v.id)?`<div class="btnrow"><input type="text" id="ren-${v.id}" maxlength="24" value="${esc(v.n)}" aria-label="New name for ${esc(v.n)}" style="flex:1;min-width:0;width:auto"><button class="btn sm" data-act="ren" data-id="${v.id}">Save</button><button class="btn ghost sm" data-act="cancel">Cancel</button></div>`:""}</div>`;
       } else {
         const confirm = pendingConfirm===("sell"+v.id);
         h += `<div class="card"><div class="row"><b>${esc(v.n)}</b><span class="status idle">Idle</span></div>
           <div class="meta"><span>${esc(ty.n)}</span><span class="num">${cap}</span><span class="num">${ty.leg} mi range</span><span>${v.jobs} jobs</span></div>
-          ${S.vehicles.length>1?`<div class="btnrow">${confirm?`<button class="btn warn sm" data-act="sell" data-id="${v.id}">Sell for ${money(ty.price*0.6)}</button><button class="btn ghost sm" data-act="cancel">Keep it</button>`:`<button class="btn ghost sm" data-act="askSell" data-id="${v.id}">Sell</button>`}</div>`:""}</div>`;
+          <div class="btnrow"><button class="btn ghost sm" data-act="askRen" data-id="${v.id}">Rename</button>${S.vehicles.length>1&&!confirm?`<button class="btn ghost sm" data-act="askSell" data-id="${v.id}">Sell</button>`:""}</div>${pendingConfirm===("ren"+v.id)?`<div class="btnrow"><input type="text" id="ren-${v.id}" maxlength="24" value="${esc(v.n)}" aria-label="New name for ${esc(v.n)}" style="flex:1;min-width:0;width:auto"><button class="btn sm" data-act="ren" data-id="${v.id}">Save</button><button class="btn ghost sm" data-act="cancel">Cancel</button></div>`:""}
+          ${S.vehicles.length>1&&confirm?`<div class="btnrow">${confirm?`<button class="btn warn sm" data-act="sell" data-id="${v.id}">Sell for ${money(ty.price*0.6)}</button><button class="btn ghost sm" data-act="cancel">Keep it</button>`:`<button class="btn ghost sm" data-act="askSell" data-id="${v.id}">Sell</button>`}</div>`:""}</div>`;
       }
     }
   }
@@ -517,15 +519,15 @@ function renderShop(){
     const locked = t.lvl>L_, poor = S.cash<t.price;
     h += `<div class="card ${locked?"dim":""}"><div class="row"><b>${esc(t.n)}</b><span class="num">${money(t.price)}</span></div>
       <div class="meta"><span class="num">${t.cars?t.cap+" cars":t.cap.toLocaleString("en-US")+" lb"}</span><span class="num">${t.leg} mi range</span><span>${t.cargo.map(c=>CARGO[c].n).join(", ")}</span><span>${t.lic==="std"?"Any driver":t.lic==="cdl"?"CDL driver":"2 CDL drivers"}</span></div>
-      ${locked?`<span class="lock">Unlocks at level ${t.lvl}</span>`:`<div class="btnrow"><select aria-label="Garage for ${esc(t.n)}" id="bs-${t.id}" style="width:auto;flex:1;min-width:0">${baseOpts}</select><button class="btn sm" data-act="buy" data-id="${t.id}" ${poor||!anySlot?"disabled":""}>${poor?"Not enough cash":!anySlot?"Garages full":"Buy"}</button></div>`}</div>`;
+      ${locked?`<span class="lock">Unlocks at level ${t.lvl}</span>`:`<div class="btnrow"><select aria-label="Hub for ${esc(t.n)}" id="bs-${t.id}" style="width:auto;flex:1;min-width:0">${baseOpts}</select><button class="btn sm" data-act="buy" data-id="${t.id}" ${poor||!anySlot?"disabled":""}>${poor?"Not enough cash":!anySlot?"Hubs full":"Buy"}</button></div>`}</div>`;
   }
   h += `</div></section>`;
   const used = new Set(S.bases.map(b=>b.city));
-  const cityOpts = Object.keys(STATES).map(s=>`<optgroup label="${STATES[s]}">${CITIES.filter(c=>c.s===s&&!used.has(c.i)).map(c=>`<option value="${c.i}">${esc(c.n)}</option>`).join("")}</optgroup>`).join("");
-  h += `<section class="sec"><h2>Garages</h2>
-    <div class="card ${L_<GARAGE_LVL?"dim":""}"><div class="row"><b>Open a new garage</b><span class="num">${money(GARAGE_PRICE)}</span></div>
-      <p class="hint">Opens a small hub (10 vehicles) and a ${RADIUS_MI}-mile job area around a new city.</p>
-      ${L_<GARAGE_LVL?`<span class="lock">Unlocks at level ${GARAGE_LVL}</span>`:`<div class="btnrow"><select id="newGarage" aria-label="City for new garage" style="flex:1;min-width:0;width:auto">${cityOpts}</select><button class="btn sm" data-act="garage" ${S.cash<GARAGE_PRICE?"disabled":""}>Open</button></div>`}</div>
+  const cityOpts = Object.keys(STATES).map(s=>`<optgroup label="${STATES[s]}">${CITIES.filter(c=>c.s===s).map(c=>`<option value="${c.i}">${esc(c.n)}</option>`).join("")}</optgroup>`).join("");
+  h += `<section class="sec"><h2>Hubs</h2>
+    <div class="card ${L_<GARAGE_LVL?"dim":""}"><div class="row"><b>Open a new hub</b><span class="num">${money(GARAGE_PRICE)}</span></div>
+      <p class="hint">Opens a small hub (10 vehicles) with a ${RADIUS_MI}-mile job area. Own as many hubs as you like, even several in one city.</p>
+      ${L_<GARAGE_LVL?`<span class="lock">Unlocks at level ${GARAGE_LVL}</span>`:`<div class="btnrow"><select id="newGarage" aria-label="City for new hub" style="flex:1;min-width:0;width:auto">${cityOpts}</select><button class="btn sm" data-act="garage" ${S.cash<GARAGE_PRICE?"disabled":""}>Open</button></div>`}</div>
     ${S.bases.map(b=>{const t=b.tier||0, nx=HUB_TIERS[t+1], n=S.vehicles.filter(v=>v.base===b.id).length;
       return `<div class="card"><div class="row"><b>${esc(cityName(b.city))}</b><span class="num">${n}/${hubCap(b)} vehicles</span></div>
       <div class="meta"><span>${HUB_TIERS[t].n}</span></div>
@@ -539,7 +541,7 @@ function renderShop(){
 function renderCrew(){
   const L_ = level();
   let h = `<section class="sec"><h2>Hire</h2>
-    <div class="card"><div class="row"><b>Driver</b><span class="num">${money(1000)}</span></div><p class="hint">Drives vans and box trucks. Takes 25% of each job.</p>
+    <div class="card"><div class="row"><b>Driver</b><span class="num">${money(1000)}</span></div><p class="hint">Drives vans and box trucks. Takes 15% of each job.</p>
       <div class="btnrow"><button class="btn sm" data-act="hire" data-kind="std" ${S.cash<1000?"disabled":""}>Hire driver</button></div></div>
     <div class="card ${L_<6?"dim":""}"><div class="row"><b>CDL driver</b><span class="num">${money(5000)}</span></div><p class="hint">Drives every truck, including semis. Takes 22% of each job.</p>
       ${L_<6?`<span class="lock">Unlocks at level 6</span>`:`<div class="btnrow"><button class="btn sm" data-act="hire" data-kind="cdl" ${S.cash<5000?"disabled":""}>Hire CDL driver</button></div>`}</div>
@@ -551,11 +553,18 @@ function renderCrew(){
       <div class="meta"><span>${DRIVER_KIND[d.kind].n}${d.hazmat?" · hazmat":""}</span><span>Level ${lv}${lv<5?` · ${nx-d.jobs} jobs to next`:""}</span><span>${d.kind==="owner"?"No cut":Math.round((DRIVER_KIND[d.kind].cut+(d.hazmat?.03:0))*100)+"% cut"}</span>${lv>1?`<span>+${(lv-1)*3}% speed</span>`:""}</div>
       ${d.kind==="cdl"&&!d.hazmat&&L_>=18?`<div class="btnrow"><button class="btn ghost sm" data-act="hazmat" data-id="${d.id}" ${S.cash<HAZMAT_PRICE||d.busy?"disabled":""}>Hazmat training · ${money(HAZMAT_PRICE)}</button></div>`:""}</div>`;
   }
-  h += `</div></section><section class="sec"><h2>Dispatchers</h2><p class="hint">A dispatcher sends idle vehicles at one garage on the best-paying job they can take, even while you are away. Takes 5% of the jobs they assign.</p>`;
+  h += `</div></section><section class="sec"><h2>Dispatchers</h2><p class="hint">A dispatcher sends idle vehicles at one hub on the best-paying job they can take, even while you are away. Takes 5% of the jobs they assign.</p>`;
   if(L_<DISPATCH_LVL) h += `<div class="card dim"><span class="lock">Unlocks at level ${DISPATCH_LVL}</span></div>`;
   else h += S.bases.map(b=>`<div class="card"><div class="row"><b>${esc(cityName(b.city))}</b><span class="status ${b.dispatcher?"idle":""}">${b.dispatcher?"Dispatcher on duty":"No dispatcher"}</span></div>
       <div class="btnrow">${b.dispatcher?`<button class="btn ghost sm" data-act="disp" data-id="${b.id}">Let go</button>`:`<button class="btn sm" data-act="disp" data-id="${b.id}" ${S.cash<DISPATCH_PRICE?"disabled":""}>Hire · ${money(DISPATCH_PRICE)}</button>`}</div></div>`).join("");
   return h + `</section>`;
+}
+function renderLog(){
+  const items = (S.log||[]).slice().reverse();
+  const fmt = t => new Date(t).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit",second:"2-digit"});
+  return `<section class="sec"><div class="sec-head"><h2>Activity log</h2><span class="hint num">${items.length} entries</span></div>
+    <p class="hint">Everything your company does: new jobs, dispatches, pickups, deliveries, purchases and level-ups. Newest first, last 300 kept.</p>
+    ${items.length?`<ol class="log">${items.map(e=>`<li><time class="num">${fmt(e.t)}</time><span>${e.h}</span></li>`).join("")}</ol>`:`<p class="hint">Nothing yet. Dispatch a job and it shows up here.</p>`}</section>`;
 }
 function renderCompany(){
   const L_ = level(), reset = pendingConfirm==="reset";
@@ -572,7 +581,7 @@ function renderCompany(){
     <section class="sec"><h3>Goals</h3><ul class="goals">${goals().map(x=>`<li class="${x[1]?"done":""}">${esc(x[0])}</li>`).join("")}</ul></section>
     <section class="sec"><h3>Clock speed</h3><p class="hint">Speeds up every trip. Handy for testing the economy; away time always counts at normal speed.</p>
       <div class="seg" role="group" aria-label="Clock speed">${[1,3,10].map(s=>`<button data-act="speed" data-s="${s}" aria-pressed="${S.speed===s}">${s}×</button>`).join("")}</div></section>
-    <section class="sec"><h3>Away from the game</h3><p class="hint">Trips in progress always finish. Garages with a dispatcher keep working at full pay for 4 hours, half pay up to 12 hours, then wait for you.</p></section>
+    <section class="sec"><h3>Away from the game</h3><p class="hint">Trips in progress always finish. Hubs with a dispatcher keep working at full pay for 4 hours, half pay up to 12 hours, then wait for you.</p></section>
     <section class="sec"><h3>Start a new game</h3><p class="hint">Erases this company and its progress in this browser, then lets you pick a new home state and garage.</p><div class="btnrow">${reset?`<button class="btn warn sm" data-act="reset">Erase company and start new</button><button class="btn ghost sm" data-act="cancel">Cancel</button>`:`<button class="btn ghost sm" data-act="askReset">Start new game</button>`}</div></section>`;
 }
 function renderHeader(){
@@ -587,8 +596,10 @@ function renderHeader(){
 function renderPanel(){
   if(!S) return;
   const body = $("#panelBody"), st = body.scrollTop;
-  body.innerHTML = tab==="jobs"?renderJobs():tab==="fleet"?renderFleet():tab==="shop"?renderShop():tab==="crew"?renderCrew():renderCompany();
+  const ae = document.activeElement, keep = ae && ae.id && body.contains(ae) && ae.tagName==="INPUT" ? {id:ae.id, v:ae.value, a:ae.selectionStart, b:ae.selectionEnd} : null;
+  body.innerHTML = tab==="jobs"?renderJobs():tab==="fleet"?renderFleet():tab==="shop"?renderShop():tab==="crew"?renderCrew():tab==="log"?renderLog():renderCompany();
   body.scrollTop = st;
+  if(keep){ const el = document.getElementById(keep.id); if(el){ el.value = keep.v; el.focus(); try{ el.setSelectionRange(keep.a, keep.b); }catch(_){} } }
   renderHeader();
 }
 function liveText(){
@@ -639,10 +650,12 @@ $("#panelBody").addEventListener("click", e=>{
     S.cash -= GARAGE_PRICE;
     const ct = CITIES[c], b = {id:nid("b"), city:c, pt:offsetPt(ct.lat,ct.lon,rnd(1,3),rnd(0,6.28)), tier:0, dispatcher:false, home:false};
     S.bases.push(b);
-    toast(`Garage opened in ${esc(cityName(c))}`); drawBases(); map.flyTo([b.pt.lat,b.pt.lon], 10, {duration:.6}); save(); refresh(); return;
+    toast(`Hub opened in ${esc(cityName(c))}`); drawBases(); map.flyTo([b.pt.lat,b.pt.lon], 10, {duration:.6}); save(); refresh(); return;
   }
   if(a==="slot"){ const b=baseById(id), nx=b&&HUB_TIERS[(b.tier||0)+1]; if(nx&&S.cash>=nx.price&&level()>=nx.lvl){S.cash-=nx.price;b.tier=(b.tier||0)+1;toast(`${esc(cityName(b.city))} is now a ${nx.n.toLowerCase()}`);save();refresh();} return; }
   if(a==="disp"){ const b=baseById(id); if(!b) return; if(b.dispatcher) b.dispatcher=false; else if(S.cash>=DISPATCH_PRICE){S.cash-=DISPATCH_PRICE;b.dispatcher=true;} save(); refresh(); return; }
+  if(a==="askRen"){ pendingConfirm="ren"+id; renderPanel(); const inp=$("#ren-"+id); if(inp){ inp.focus(); inp.select(); } return; }
+  if(a==="ren"){ const v=S.vehicles.find(x=>x.id===id), inp=$("#ren-"+id); const n=(inp?.value||"").trim().slice(0,24); if(v&&n&&n!==v.n){ logEvent(`Renamed <b>${esc(v.n)}</b> to <b>${esc(n)}</b>`); v.n=n; save(); } pendingConfirm=null; refresh(); return; }
   if(a==="askSell"){ pendingConfirm="sell"+id; renderPanel(); return; }
   if(a==="sell"){ const v=S.vehicles.find(x=>x.id===id); if(v&&!v.busy){S.cash+=TYPE[v.type].price*0.6; S.vehicles=S.vehicles.filter(x=>x!==v);} pendingConfirm=null; save(); refresh(); return; }
   if(a==="cancel"){ pendingConfirm=null; renderPanel(); return; }
@@ -655,10 +668,13 @@ $("#panelBody").addEventListener("click", e=>{
     $("#panelBody").innerHTML=""; showStart(); return;
   }
 });
+$("#panelBody").addEventListener("keydown", e=>{ if(e.key==="Enter" && e.target.id?.startsWith("ren-")){ e.preventDefault(); $(`[data-act=ren][data-id="${e.target.id.slice(4)}"]`)?.click(); } if(e.key==="Escape" && e.target.id?.startsWith("ren-")){ pendingConfirm=null; renderPanel(); } });
 $("#panelBody").addEventListener("change", e=>{ if(e.target.name==="veh") chosenVeh=e.target.value; });
 document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>setTab(b.dataset.tab)));
 
-function toast(html, ms=3800){
+function logEvent(html, when){ if(!S) return; (S.log ||= []).push({t: when||Date.now(), h: html}); if(S.log.length>300) S.log.splice(0, S.log.length-300); if(tab==="log" && !simulating) renderPanel(); }
+function toast(html, ms=3800, noLog){
+  if(!noLog) logEvent(html);
   const t = document.createElement("div"); t.className="toast"; t.innerHTML=html; $("#toasts").appendChild(t);
   while($("#toasts").children.length>4) $("#toasts").firstChild.remove();
   setTimeout(()=>t.remove(), ms);

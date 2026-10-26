@@ -73,14 +73,14 @@ const TYPES = [
 ];
 const TYPE = Object.fromEntries(TYPES.map(t=>[t.id,t]));
 const DRIVER_KIND = {
-  owner:{n:"Owner",cut:0}, std:{n:"Driver",cut:.25,fee:1000,lvl:1}, cdl:{n:"CDL driver",cut:.22,fee:5000,lvl:6}
+  owner:{n:"Owner",cut:0}, std:{n:"Driver",cut:.15,fee:1000,lvl:1}, cdl:{n:"CDL driver",cut:.22,fee:5000,lvl:6}
 };
 const FIRST = ["Marcus","Dana","Luis","Keisha","Travis","Rosa","Dwayne","Megan","Andre","Tasha","Cody","Imani","Hector","Brianna","Jamal","Lena","Wyatt","Carmen","Darnell","Shelby","Omar","Kayla","Reggie","Nina"];
 const LAST = ["Brooks","Ortiz","Hale","Washington","Price","Nguyen","Carter","Reyes","Mills","Jenkins","Parker","Diaz","Cole","Bishop","Foster","Ramos","Banks","Lowe","Grant","Avery"];
 const DRV_LEVELS = [0,5,15,30,50];
-const GARAGE_PRICE = 40000, GARAGE_LVL = 3, SLOT_PRICE = 15000, DISPATCH_PRICE = 15000, DISPATCH_LVL = 8, HAZMAT_PRICE = 10000;
+const GARAGE_PRICE = 40000, GARAGE_LVL = 1, SLOT_PRICE = 15000, DISPATCH_PRICE = 15000, DISPATCH_LVL = 8, HAZMAT_PRICE = 10000;
 const RADIUS_MI = 150, MAX_DEADHEAD = 450, BOARD_PER_BASE = 10, MIN = 60000;
-const UNLOCKS = {2:"Box truck",3:"Second garage",5:"Reefer box truck",6:"CDL drivers and straight truck",8:"Dispatchers",10:"Semi + dry van",12:"Semi + reefer",14:"Semi + flatbed",15:"Rail depots (next build)",18:"Tankers and hazmat training",20:"Car haulers, air cargo (next build)",25:"Team-driven semi"};
+const UNLOCKS = {2:"Box truck",5:"Reefer box truck",6:"CDL drivers and straight truck",8:"Dispatchers",10:"Semi + dry van",12:"Semi + reefer",14:"Semi + flatbed",15:"Rail depots (next build)",18:"Tankers and hazmat training",20:"Car haulers, air cargo (next build)",25:"Team-driven semi"};
 
 
 /* Hub sizes: every garage starts Small and can be upgraded. */
