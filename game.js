@@ -28,7 +28,7 @@ const drvLevel = d => {let l=1;DRV_LEVELS.forEach((t,i)=>{if(d.jobs>=t)l=i+1;});
 function payFor(miles, weight, cargo, urg){
   const w = cargo==="vehicles" ? weight*4000 : weight;
   const u = urg==="express"?1.8:urg==="priority"?1.3:1;
-  return Math.round((150 + 1.5*miles*Math.pow(w/1000,0.8)) * CARGO[cargo].mult * u);
+  return Math.round((150 + 1.5*miles*Math.pow(w/1000,0.8)) * CARGO[cargo].mult * u * PAY_SCALE);
 }
 function offsetPt(lat, lon, miles, ang){
   return {lat: lat + Math.sin(ang)*miles/MI_DEG, lon: lon + Math.cos(ang)*miles/(MI_DEG*Math.cos(lat*Math.PI/180))};
@@ -71,7 +71,7 @@ function getRoute(a, b){
       const r = js.routes && js.routes[0]; if(!r) throw new Error("no route");
       const coords = thin(r.geometry.coordinates.map(c=>[+c[1].toFixed(5), +c[0].toFixed(5)]), 600);
       const wp = js.waypoints||[];
-      return {mi: r.distance/1609.34, path: coords, names: wp.map(w=>w.name||""), locs: wp.map(w=>({lat:w.location[1], lon:w.location[0]}))};
+      return {mi: r.distance/1609.34, sec: r.duration, path: coords, names: wp.map(w=>w.name||""), locs: wp.map(w=>({lat:w.location[1], lon:w.location[0]}))};
     }catch(e){ routeCache.delete(k); return null; }
     finally{ await new Promise(r=>setTimeout(r, 700)); }  // be polite to the shared demo server
   });
@@ -135,30 +135,26 @@ function spawnJob(base, depth=0){
   let weight;
   if(t.cars) weight = Math.round(rnd(3,9.99));
   else { const lo = cargo==="parcels"?0.15:0.35; weight = Math.max(300, Math.round(rnd(lo,1)*t.cap/50)*50); }
-  const near = citiesNear(base.city, RADIUS_MI);
-  const origin = Math.random()<0.45 ? base.city : pick(near);
+  // Pickups sit close to the hub, like missions around a Mission Chief station.
+  const bp = basePt(base);
+  const from = {biz:pick(PRODUCERS[cargo]), ...offsetPt(bp.lat, bp.lon, Math.random()<0.5 ? rnd(1,10) : rnd(10,RADIUS_MI), rnd(0,6.28))};
+  from.c = nearestCity(from); from.name = bizName(from.biz); from.num = houseNo();
   const r = Math.random();
-  const tier = r<0.45?"local": r<0.8?"regional": r<0.94?"long":"cross";
+  const tier = r<0.55?"local": r<0.9?"regional": r<0.98?"long":"cross";
   const maxLeg = t.leg*0.85; // leave room: real road miles run a little longer than the estimate
-  const ranges = {regional:[50,Math.min(250,maxLeg)],long:[250,Math.min(800,maxLeg)],cross:[800,maxLeg]};
-  let dest = origin;
+  const ranges = {regional:[30,Math.min(120,maxLeg)],long:[120,Math.min(400,maxLeg)],cross:[400,maxLeg]};
+  let to = null;
   if(tier!=="local" && ranges[tier][1]>ranges[tier][0]){
     const [a,bm] = ranges[tier];
-    const cand = CITIES.filter(c=>{const m=roadMi(origin,c.i);return m>=a&&m<=bm;});
-    if(cand.length) dest = pick(cand).i;
+    const cand = CITIES.filter(c=>{const m=hav(from,c)*1.2;return m>=a&&m<=bm;});
+    if(cand.length){ const dc = pick(cand); to = {c:dc.i, ...offsetPt(dc.lat, dc.lon, rnd(0.5,4), rnd(0,6.28))}; }
   }
-  const oc = CITIES[origin], dc = CITIES[dest];
-  const ctr = origin===base.city && base.pt ? base.pt : oc;
-  const from = {c:origin, biz:pick(PRODUCERS[cargo]), ...offsetPt(ctr.lat, ctr.lon, rnd(0.5,4), rnd(0,6.28))};
-  from.name = bizName(from.biz); from.num = houseNo();
-  let to;
-  if(dest===origin){ to = {c:dest, ...offsetPt(from.lat, from.lon, rnd(4,22), rnd(0,6.28))}; }
-  else to = {c:dest, ...offsetPt(dc.lat, dc.lon, rnd(0.5,4), rnd(0,6.28))};
+  if(!to){ to = offsetPt(from.lat, from.lon, rnd(3,20), rnd(0,6.28)); to.c = nearestCity(to); }
   to.biz = pick(ACCEPTORS[cargo]); if(to.biz===from.biz) to.biz = ACCEPTORS[cargo][0];
   to.name = bizName(to.biz); to.num = houseNo();
   const miles = estMi(from, to);
   const urg = Math.random()<0.07?"express":Math.random()<0.2?"priority":"standard";
-  const life = urg==="express"? rnd(6,9)*MIN : urg==="priority"? rnd(12,18)*MIN : rnd(30,60)*MIN;
+  const life = urg==="express"? rnd(15,25)*MIN : urg==="priority"? rnd(30,45)*MIN : rnd(30,60)*MIN;
   const j = {id:nid("j"), base:base.id, cargo, weight, miles, urg, from, to, posted:S.clock, expires: urg==="standard" ? null : S.clock+life, routed:false};
   j.pay = payFor(miles, weight, cargo, urg);
   S.jobs.push(j);
@@ -174,7 +170,7 @@ function routeJob(j){
     if(!S || !S.jobs.includes(j)) return;
     j.routed = true;
     if(r){
-      j.miles = Math.max(1, Math.round(r.mi)); j.path = r.path; j.pay = payFor(j.miles, j.weight, j.cargo, j.urg);
+      j.miles = Math.max(1, Math.round(r.mi)); j.sec = r.sec; j.path = r.path; j.pay = payFor(j.miles, j.weight, j.cargo, j.urg);
       if(r.locs && r.locs.length===2){ Object.assign(j.from, r.locs[0]); Object.assign(j.to, r.locs[1]); }
       if(r.names){ j.from.street = r.names[0]; j.to.street = r.names[1]; }
       const m = jobMarkers.get(j.id); if(m) m.setLatLng([j.from.lat, j.from.lon]);
@@ -197,15 +193,20 @@ function freeDrivers(lic, cargo){
   if(lic==="cdl") return c[0]?[c[0]]:null;
   return c.length>=2?[c[0],c[1]]:null;
 }
+const driveMs = (miles, sec, slow, f) => (sec ? sec*1000 : miles/AVG_MPH_NO_ROUTE*3600e3) * slow * f;
+function handleMs(j){ // loading or unloading time for this load
+  const m = j.cargo==="vehicles" ? LOAD_BASE_MIN + LOAD_MIN_PER_CAR*j.weight : LOAD_BASE_MIN + LOAD_MIN_PER_1000LB*j.weight/1000;
+  return m*MIN;
+}
 function planTrip(v, j, drivers){
   const t = TYPE[v.type], bp = basePt(baseById(v.base));
   const dead = estMi(bp, j.from), back = estMi(j.to, bp);
   const lv = Math.max(...drivers.map(drvLevel));
   const f = 1-0.03*(lv-1);
-  const ld = (t.big?1.5:0.5)*MIN;
-  const tDead = Math.max(0.2*MIN, dead/30/2*MIN*f), tHaul = (1+j.miles/30)*MIN*f, tBack = Math.max(0.2*MIN, back/30/2*MIN*f);
+  const ld = handleMs(j), lu = handleMs(j);
+  const tDead = dead<0.5 ? 0.5*MIN : driveMs(dead, 0, t.slow, f), tHaul = driveMs(j.miles, j.sec, t.slow, f), tBack = back<0.5 ? 0.5*MIN : driveMs(back, 0, t.slow, f);
   const cut = drivers.reduce((s,d)=>s+DRIVER_KIND[d.kind].cut+(d.hazmat?0.03:0),0);
-  return {dead, back, tDead, ld, tHaul, tBack, total:tDead+ld+tHaul+ld+tBack, deliverIn:tDead+ld+tHaul+ld, cut, bonus:1+0.02*(lv-1)};
+  return {dead, back, tDead, ld, lu, tHaul, tBack, total:tDead+ld+tHaul+lu+tBack, deliverIn:tDead+ld+tHaul+lu, cut, bonus:1+0.02*(lv-1)};
 }
 function vehicleFor(v, j){
   const t = TYPE[v.type];
@@ -233,7 +234,7 @@ function mkSeg(ph, path, t0, t1){ return {ph, path, t0, t1}; }
 function dispatch(j, v, viaDispatcher){
   const r = vehicleFor(v,j); if(!r.ok) return false;
   const p = r.plan, base = baseById(v.base), B = basePt(base), O = {lat:j.from.lat,lon:j.from.lon}, D = {lat:j.to.lat,lon:j.to.lon};
-  const t0 = S.clock, a = t0+p.tDead, b = a+p.ld, c = b+p.tHaul, d = c+p.ld, e = d+p.tBack;
+  const t0 = S.clock, a = t0+p.tDead, b = a+p.ld, c = b+p.tHaul, d = c+p.lu, e = d+p.tBack;
   const trip = {id:nid("t"), v:v.id, drivers:r.drivers.map(x=>x.id), job:{...j, path:undefined},
     segs:[ mkSeg("dead",straight(B,O),t0,a), mkSeg("load",[[O.lat,O.lon]],a,b), mkSeg("haul", j.path||straight(O,D), b,c),
            mkSeg("load",[[D.lat,D.lon]],c,d), mkSeg("ret",straight(D,B),d,e) ],
@@ -297,7 +298,7 @@ function logic(){
   for(const b of S.bases){
     if(!b.dispatcher) continue;
     for(const v of S.vehicles.filter(x=>x.base===b.id && !x.busy)){
-      const best = S.jobs.filter(j=>roadMi(b.city,j.from.c)<=RADIUS_MI && vehicleFor(v,j).ok).sort((a,c)=>c.pay-a.pay)[0];
+      const best = S.jobs.filter(j=>estMi(basePt(b),j.from)<=RADIUS_MI*1.3 && vehicleFor(v,j).ok).sort((a,c)=>c.pay-a.pay)[0];
       if(best){ dispatch(best, v, true); changed = true; }
     }
   }
@@ -466,7 +467,7 @@ function dispatchCard(j){
     if(!chosenVeh || !st.opts.find(o=>o.v.id===chosenVeh)) chosenVeh = st.opts[0].v.id;
     opts = `<div class="opts">${st.opts.map(o=>{const p=o.r.plan;const net=Math.round(j.pay*p.bonus*(1-p.cut));
       return `<label class="opt"><input type="radio" name="veh" value="${o.v.id}" ${o.v.id===chosenVeh?"checked":""}>
-      <span><b>${esc(o.v.n)}</b> · ${esc(TYPE[o.v.type].n)}<small>${esc(o.r.drivers.map(d=>d.name).join(" + "))} · ${p.dead>1?`${p.dead} mi to pickup · `:""}delivers in ${dur(p.deliverIn)}, home in ${dur(p.total)}</small></span>
+      <span><b>${esc(o.v.n)}</b> · ${esc(TYPE[o.v.type].n)}<small>${esc(o.r.drivers.map(d=>d.name).join(" + "))} · ${p.dead>1?`${p.dead} mi to pickup (${dur(p.tDead)}) · `:""}loading ${dur(p.ld)} · drive ${dur(p.tHaul)} · unloading ${dur(p.lu)}<br>Delivers in ${dur(p.deliverIn)}, back at the hub in ${dur(p.total)}</small></span>
       <span class="pay" title="After driver pay">${money(net)}</span></label>`;}).join("")}</div>
       <div class="btnrow"><button class="btn" data-act="go" data-id="${j.id}" ${j.routing?"disabled":""}>${j.routing?"Finding route…":"Dispatch"}</button><button class="btn ghost" data-act="unsel">Close</button></div>`;
   } else {
@@ -546,7 +547,7 @@ function renderShop(){
   const cityOpts = Object.keys(STATES).map(s=>`<optgroup label="${STATES[s]}">${CITIES.filter(c=>c.s===s).map(c=>`<option value="${c.i}">${esc(c.n)}</option>`).join("")}</optgroup>`).join("");
   h += `<section class="sec"><h2>Hubs</h2>
     <div class="card ${L_<GARAGE_LVL?"dim":""}"><div class="row"><b>Open a new hub</b><span class="num">${money(GARAGE_PRICE)}</span></div>
-      <p class="hint">Opens a small hub (10 vehicles) with a ${RADIUS_MI}-mile job area. Own as many hubs as you like, even several in one city.</p>
+      <p class="hint">Opens a small hub (10 vehicles) with jobs posted within about ${RADIUS_MI} miles. Own as many hubs as you like, even several in one city.</p>
       <div class="btnrow"><button class="btn sm" data-act="placeHub" ${S.cash<GARAGE_PRICE?"disabled":""}>${S.cash<GARAGE_PRICE?"Not enough cash":"Pick a spot on the map"}</button></div></div>
     ${S.bases.map(b=>{const t=b.tier||0, nx=HUB_TIERS[t+1], n=S.vehicles.filter(v=>v.base===b.id).length;
       return `<div class="card"><div class="row"><b>${esc(baseName(b))}</b><span class="num">${n}/${hubCap(b)} vehicles</span></div>

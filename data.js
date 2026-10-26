@@ -79,7 +79,7 @@ const FIRST = ["Marcus","Dana","Luis","Keisha","Travis","Rosa","Dwayne","Megan",
 const LAST = ["Brooks","Ortiz","Hale","Washington","Price","Nguyen","Carter","Reyes","Mills","Jenkins","Parker","Diaz","Cole","Bishop","Foster","Ramos","Banks","Lowe","Grant","Avery"];
 const DRV_LEVELS = [0,5,15,30,50];
 const GARAGE_PRICE = 40000, GARAGE_LVL = 1, SLOT_PRICE = 15000, DISPATCH_PRICE = 15000, DISPATCH_LVL = 8, HAZMAT_PRICE = 10000;
-const RADIUS_MI = 150, MAX_DEADHEAD = 450, BOARD_PER_BASE = 10, MIN = 60000;
+const RADIUS_MI = 30, MAX_DEADHEAD = 60, BOARD_PER_BASE = 10, MIN = 60000;
 const UNLOCKS = {2:"Box truck",5:"Reefer box truck",6:"CDL drivers and straight truck",8:"Dispatchers",10:"Semi + dry van",12:"Semi + reefer",14:"Semi + flatbed",15:"Rail depots (next build)",18:"Tankers and hazmat training",20:"Car haulers, air cargo (next build)",25:"Team-driven semi"};
 
 
@@ -142,3 +142,13 @@ const VEHICLE_ICONS = {
 // Every vehicle type in the game today is a truck; trains, planes and buses use the same table when they arrive.
 TYPES.forEach(t => { t.mode = t.mode || "truck"; });
 const iconSvg = (mode, size=14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="${VEHICLE_ICONS[mode]||VEHICLE_ICONS.truck}"/></svg>`;
+
+/* Timing (Mission Chief style: real time at 1x clock speed).
+   Driving uses the real road route's drive time, slowed for bigger vehicles.
+   Loading and unloading take longer the heavier the load. */
+const PAY_SCALE = 6;                 // pay multiplier to match the slower, real-time trips
+const AVG_MPH_NO_ROUTE = 48;         // used until the real route comes back
+const LOAD_BASE_MIN = 5;             // dock check-in, paperwork, securing the load
+const LOAD_MIN_PER_1000LB = 0.6;     // 3,000 lb ≈ 7 min, 10,000 lb ≈ 11 min, 45,000 lb ≈ 32 min
+const LOAD_MIN_PER_CAR = 10;         // car haulers, per vehicle
+TYPES.forEach(t => { t.slow = t.id==="van" ? 1 : t.big ? 1.15 : 1.05; });
