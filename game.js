@@ -984,7 +984,6 @@ function renderJobs(mode="truck"){
   const sj = S.jobs.find(j=>j.id===selectedJob && !!j.rail===rail);
   const list = S.jobs.filter(j=>!!j.rail===rail).map(j=>({j,can:jobStatus(j).can})).sort((a,b)=>(b.can-a.can)||(b.j.pay-a.j.pay));
   const can = list.filter(x=>x.can), cant = list.filter(x=>!x.can && !x.j.locked), waiting = list.filter(x=>x.j.locked);
-  const open = goals().filter(x=>!x[1]).slice(0,3);
   let h = "";
   if(sj) h += dispatchCard(sj);
   if(rail){
@@ -997,7 +996,6 @@ function renderJobs(mode="truck"){
     h += `<section class="sec"><div class="sec-head"><h3>Level ${L_} → ${L_+1}</h3><span class="hint num">${Math.floor(S.xp-xpNeed(L_)).toLocaleString("en-US")} / ${(need-xpNeed(L_)).toLocaleString("en-US")} XP</span></div>
       <div class="prog"><i style="width:${Math.min(100,(S.xp-xpNeed(L_))/(need-xpNeed(L_))*100)}%;background:var(--sign)"></i></div>
       <p class="hint">${Math.ceil(need-S.xp).toLocaleString("en-US")} XP to level ${L_+1}. Each delivery earns 1 XP per $100 it pays.${nxt?` Next unlock: ${esc(nxt[1])} at level ${nxt[0]}.`:""} Board: ${boardCount()} of ${maxJobs()} jobs, a new one every ${JOB_EVERY_MS/1000} seconds.</p></section>`; }
-  if(!rail && open.length) h += `<section class="sec"><h3>Next goals</h3><ul class="goals">${open.map(x=>`<li>${esc(x[0])}</li>`).join("")}</ul></section>`;
   h += `<section class="sec"><div class="sec-head"><h2>Ready to run</h2><span class="hint num">${can.length}</span></div>${can.length?`<div class="list">${can.map(x=>jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. ${rail?"A new rail job posts as soon as a train is free.":"A new job posts every 30 seconds."}</p>`}</section>`;
   if(cant.length) h += `<section class="sec"><div class="sec-head"><h2>Other jobs nearby</h2><span class="hint num">${cant.length}</span></div><div class="list">${cant.map(x=>jobCard(x.j)).join("")}</div></section>`;
   if(waiting.length) h += `<section class="sec"><div class="sec-head"><h2>Next intermodal legs</h2><span class="hint num">${waiting.length}</span></div><p class="hint">Each opens when the leg before it is delivered. Finish all three for a ${CHAIN_BONUS*100}% bonus.</p><div class="list">${waiting.map(x=>jobCard(x.j)).join("")}</div></section>`;
