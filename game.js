@@ -1454,6 +1454,13 @@ function start(){
     S.trips = S.trips.map(migrateTrip); S.trips.forEach(pruneLoads); S.vehicles.forEach(v=>{ delete v.ret; v.busy = !!tripOf(v); });
     S.bases.forEach((b,i)=>{ if(b.tier==null) b.tier=0; delete b.slots; if(!b.name) b.name = b.home ? "HQ" : `Hub ${i+1}`; });
     S.jobs = S.jobs.filter(fitsUnlocked);
+    // Boards posted under older, larger limits: keep the best jobs up to today's limit (runnable first, then highest pay).
+    for(const [isRail, cap] of [[false, maxJobs()], [true, maxRailJobs()]]){
+      const mine = S.jobs.filter(j=>!!j.rail===isRail);
+      if(mine.length <= cap) continue;
+      const keep = new Set(mine.sort((a,b)=>(jobStatus(b).can-jobStatus(a).can)||(b.pay-a.pay)).slice(0,cap));
+      S.jobs = S.jobs.filter(j=>!!j.rail!==isRail || keep.has(j));
+    }
     S.jobs.forEach(j=>{ j.pay = jobPay(j); if(j.urg==="standard") j.expires=null; if(!j.from.name){ j.from.name=bizName(j.from.biz); j.from.num=houseNo(); j.to.name=bizName(j.to.biz); j.to.num=houseNo(); } });
     const dt = Date.now() - S.lastReal; let log = null;
     S.lastReal = Date.now();
