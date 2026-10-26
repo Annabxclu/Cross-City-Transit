@@ -546,7 +546,7 @@ function renderCompany(){
     <section class="sec"><h3>Clock speed</h3><p class="hint">Speeds up every trip. Handy for testing the economy; away time always counts at normal speed.</p>
       <div class="seg" role="group" aria-label="Clock speed">${[1,3,10].map(s=>`<button data-act="speed" data-s="${s}" aria-pressed="${S.speed===s}">${s}×</button>`).join("")}</div></section>
     <section class="sec"><h3>Away from the game</h3><p class="hint">Trips in progress always finish. Garages with a dispatcher keep working at full pay for 4 hours, half pay up to 12 hours, then wait for you.</p></section>
-    <section class="sec"><h3>Start over</h3><div class="btnrow">${reset?`<button class="btn warn sm" data-act="reset">Erase this company</button><button class="btn ghost sm" data-act="cancel">Cancel</button>`:`<button class="btn ghost sm" data-act="askReset">Reset game</button>`}</div></section>`;
+    <section class="sec"><h3>Start a new game</h3><p class="hint">Erases this company and its progress in this browser, then lets you pick a new home state and garage.</p><div class="btnrow">${reset?`<button class="btn warn sm" data-act="reset">Erase company and start new</button><button class="btn ghost sm" data-act="cancel">Cancel</button>`:`<button class="btn ghost sm" data-act="askReset">Start new game</button>`}</div></section>`;
 }
 function renderHeader(){
   const L_ = level(), a = xpNeed(L_), b = xpNeed(L_+1);
