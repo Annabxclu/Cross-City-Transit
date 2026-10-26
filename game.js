@@ -163,7 +163,8 @@ async function reverseGeocode(p){
 const citiesNear = (ci, maxMi) => CITIES.filter(c=>roadMi(ci,c.i)<=maxMi).map(c=>c.i);
 function spawnJob(base, depth=0){
   const L = level();
-  if(L>=RAIL_LVL && depth===0 && Math.random() < (S.vehicles.some(isTrain) ? 0.35 : 0.15)){ const rj = spawnRailJob(base); if(rj) return rj; }
+  const trains = S.vehicles.filter(isTrain), railOpen = S.jobs.some(x=>x.rail && !x.locked && trains.some(v=>vehicleFor(v,x).ok || tripOf(v)));
+  if(L>=RAIL_LVL && depth===0 && ((trains.length && !railOpen) || Math.random() < (trains.length ? 0.35 : 0.15))){ const rj = spawnRailJob(base); if(rj) return rj; }
   const ownedTypes = [...new Set(trucks().map(v=>v.type))];
   const reach = TYPES.filter(t=>t.lvl<=L);   // only vehicles you can already buy
   // Keep the board useful: while fewer jobs fit your fleet than you have vehicles, only post jobs you can run.
@@ -218,7 +219,8 @@ function spawnRailJob(base){
   const owned = [...new Set(S.vehicles.filter(isTrain).flatMap(v=>Object.keys(v.cars||{}).filter(k=>v.cars[k]>0 && k!=="well")))];
   const ct = owned.length && Math.random()<0.65 ? pick(owned) : pick(Object.keys(RAILCARS).filter(k=>k!=="well"));
   const car = RAILCARS[ct], cargo = pick(car.cargo);
-  const units = Math.max(1, Math.round(rnd(1, Math.min(maxCars, 6))));
+  const mine = Math.max(0, ...S.vehicles.filter(isTrain).map(v=>trainSlots(v, ct)));   // size jobs to the cars you own
+  const units = Math.max(1, Math.round(rnd(1, mine ? Math.min(mine, maxCars) : Math.min(maxCars, 6))));
   const weight = Math.round(units*car.cap*rnd(0.75,1)/1000)*1000;
   const j = {id:nid("j"), base:base.id, rail:true, carType:ct, units, cargo, weight, miles:Math.round(hav(O,D)*1.25), urg:"standard",
     from:{...yardStop(O)}, to:{...yardStop(D)}, posted:S.clock, expires:null, routed:false};
@@ -491,6 +493,11 @@ function logic(){
   if(S.jobs.length!==n0) changed = true;
   // Mission Chief style: one new job every 30 seconds, up to one more than your vehicle count.
   // An empty board refills right away so there is always something to do.
+  // A train with nothing to do gets a rail job right away (at most one every 10 seconds), even on a full board.
+  if(level()>=RAIL_LVL && S.clock >= (S.nextRailAt||0) && S.vehicles.some(v=>isTrain(v) && !tripOf(v)) && !S.jobs.some(x=>x.rail && !x.locked)){
+    S.nextRailAt = S.clock + 10000; const rj = spawnRailJob(pick(S.bases));
+    if(rj){ changed = true; if(!simulating && !awayLog) toast(`New rail job: <b>${esc(rj.from.name)}</b> to ${esc(rj.to.name)} · <span class="num">${money(rj.pay)}</span>`, 3500); }
+  }
   if(boardCount() < maxJobs() && (boardCount()===0 || S.clock >= (S.nextJobAt||0))){
     const j = spawnJob(pick(S.bases)); S.nextJobAt = S.clock + JOB_EVERY_MS; changed = true;
     if(j && !simulating && !awayLog) toast(`New ${j.event?esc(j.item.toLowerCase())+" ":""}job: <b>${esc(j.from.name)}</b> in ${esc(cityName(j.from.c))} · <span class="num">${money(j.pay)}</span>`, 3000);
