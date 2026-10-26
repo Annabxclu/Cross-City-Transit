@@ -273,3 +273,7 @@ label.fld{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(
 .collapse:hover{background:var(--surface2)}
 .sec.collapsed > :not(.sec-head){display:none}
 .sec.collapsed .sec-tools .hint{display:none}
+.fgroup{display:flex;flex-direction:column;gap:8px}
+.fgroup-head{display:flex;align-items:center;gap:8px;justify-content:space-between}
+.fgroup-head h3{min-width:0}
+.fgroup.collapsed > .list{display:none}

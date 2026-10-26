@@ -1017,10 +1017,11 @@ function phaseText(tr,t){
 function nextStopAt(tr,t){ const sg = tr.segs.find(x=>x.kind==="stop" && !x.done && x.t1>t); return sg ? {t:sg.t0>t?sg.t0:sg.t1, label: sg.t0>t?"Next stop in":"Stop done in"} : {t:tr.endAt, label:"Back at hub in"}; }
 function renderFleet(){
   const t = displayClock();
-  let h = `<section class="sec"><div class="sec-head"><h2>Your fleet</h2><span class="hint num">${S.vehicles.length} vehicles</span></div><div class="list">`;
+  const tk = trucks(), onRoad = tk.filter(v=>tripOf(v)).length;
+  let h = `<section class="sec ${cz("f-trucks")}">${secHead("f-trucks","Trucks",`<span class="hint num">${tk.length} · ${onRoad} on the road</span>`)}<div class="list">`;
   for(const b of S.bases){
     const vs = S.vehicles.filter(v=>v.base===b.id);
-    h += `<h3>${esc(baseName(b))} <span class="hint" style="text-transform:none;letter-spacing:0">${esc(baseAddr(b))}</span> <span class="num" style="letter-spacing:0">${vs.length}/${hubCap(b)}</span>${b.dispatcher?" · dispatcher on":""}</h3>`;
+    h += `<div class="fgroup ${cz("f-hub-"+b.id)}"><div class="fgroup-head"><h3>${esc(baseName(b))} <span class="hint" style="text-transform:none;letter-spacing:0">${esc(baseAddr(b))}</span> <span class="num" style="letter-spacing:0">${vs.length}/${hubCap(b)}</span>${b.dispatcher?" · dispatcher on":""}</h3>${groupBtn("f-hub-"+b.id, baseName(b))}</div><div class="list">`;
     for(const v of vs){
       const tr = S.trips.find(x=>x.v===v.id), ty = TYPE[v.type];
       const cap = ty.cars?`${ty.cap} cars`:`${ty.cap.toLocaleString("en-US")} lb`;
@@ -1042,10 +1043,16 @@ function renderFleet(){
           ${S.vehicles.length>1&&confirm?`<div class="btnrow">${confirm?`<button class="btn warn sm" data-act="sell" data-id="${v.id}">Sell for ${money(ty.price*0.6)}</button><button class="btn ghost sm" data-act="cancel">Keep it</button>`:`<button class="btn ghost sm" data-act="askSell" data-id="${v.id}">Sell</button>`}</div>`:""}</div>`;
       }
     }
+    h += `</div></div>`;
   }
+  h += `</div></section>`;
   const trains = S.vehicles.filter(isTrain);
-  if(trains.length){ h += `<h3>Trains</h3>`; for(const v of trains) h += trainCard(v, t); }
-  return h + `</div></section>`;
+  if(trains.length){
+    h += `<section class="sec ${cz("f-trains")}">${secHead("f-trains","Trains",`<span class="hint num">${trains.length} · ${trains.filter(v=>tripOf(v)).length} on the road</span>`)}<div class="list">`;
+    for(const v of trains) h += trainCard(v, t);
+    h += `</div></section>`;
+  }
+  return h;
 }
 function trainCard(v, t){
   const ty = TYPE[v.type], tr = tripOf(v), y = YARD[v.yard];
@@ -1085,6 +1092,7 @@ function renderTrainShop(L_){
 // Collapsible shop sections; remembered in this browser.
 let collapsed = new Set(); try{ collapsed = new Set(JSON.parse(localStorage.getItem("freight-dispatch-collapsed")||"[]")); }catch(_){}
 const cz = k => collapsed.has(k) ? "collapsed" : "";
+function groupBtn(k, title){ const c = collapsed.has(k); return `<button class="collapse" data-act="toggleSec" data-k="${k}" aria-expanded="${!c}" title="${c?"Show":"Hide"} ${esc(title)}">${c?"+":"−"}</button>`; }
 function secHead(k, title, extra=""){
   const c = collapsed.has(k);
   return `<div class="sec-head"><h2>${title}</h2><span class="sec-tools">${extra}<button class="collapse" data-act="toggleSec" data-k="${k}" aria-expanded="${!c}" title="${c?"Show":"Hide"} ${title.toLowerCase()}">${c?"+":"−"}</button></span></div>`;
