@@ -135,26 +135,28 @@ function spawnJob(base, depth=0){
   let weight;
   if(t.cars) weight = Math.round(rnd(3,9.99));
   else { const lo = cargo==="parcels"?0.15:0.35; weight = Math.max(300, Math.round(rnd(lo,1)*t.cap/50)*50); }
-  // Pickups sit close to the hub, like missions around a Mission Chief station.
-  const bp = basePt(base);
-  const from = {biz:pick(PRODUCERS[cargo]), ...offsetPt(bp.lat, bp.lon, Math.random()<0.5 ? rnd(1,10) : rnd(10,RADIUS_MI), rnd(0,6.28))};
-  from.c = nearestCity(from); from.name = bizName(from.biz); from.num = houseNo();
+  // Pickups: near the hub or in a city within the hub's job area.
+  const bp = basePt(base), near = citiesNear(base.city, RADIUS_MI);
+  let from;
+  if(Math.random()<0.45 || !near.length) from = offsetPt(bp.lat, bp.lon, rnd(0.5,4), rnd(0,6.28));
+  else { const oc = CITIES[pick(near)]; from = offsetPt(oc.lat, oc.lon, rnd(0.5,4), rnd(0,6.28)); }
+  from.biz = pick(PRODUCERS[cargo]); from.c = nearestCity(from); from.name = bizName(from.biz); from.num = houseNo();
   const r = Math.random();
-  const tier = r<0.55?"local": r<0.9?"regional": r<0.98?"long":"cross";
+  const tier = r<0.45?"local": r<0.8?"regional": r<0.94?"long":"cross";
   const maxLeg = t.leg*0.85; // leave room: real road miles run a little longer than the estimate
-  const ranges = {regional:[30,Math.min(120,maxLeg)],long:[120,Math.min(400,maxLeg)],cross:[400,maxLeg]};
+  const ranges = {regional:[50,Math.min(250,maxLeg)],long:[250,Math.min(800,maxLeg)],cross:[800,maxLeg]};
   let to = null;
   if(tier!=="local" && ranges[tier][1]>ranges[tier][0]){
     const [a,bm] = ranges[tier];
     const cand = CITIES.filter(c=>{const m=hav(from,c)*1.2;return m>=a&&m<=bm;});
     if(cand.length){ const dc = pick(cand); to = {c:dc.i, ...offsetPt(dc.lat, dc.lon, rnd(0.5,4), rnd(0,6.28))}; }
   }
-  if(!to){ to = offsetPt(from.lat, from.lon, rnd(3,20), rnd(0,6.28)); to.c = nearestCity(to); }
+  if(!to){ to = offsetPt(from.lat, from.lon, rnd(4,22), rnd(0,6.28)); to.c = nearestCity(to); }
   to.biz = pick(ACCEPTORS[cargo]); if(to.biz===from.biz) to.biz = ACCEPTORS[cargo][0];
   to.name = bizName(to.biz); to.num = houseNo();
   const miles = estMi(from, to);
   const urg = Math.random()<0.07?"express":Math.random()<0.2?"priority":"standard";
-  const life = urg==="express"? rnd(15,25)*MIN : urg==="priority"? rnd(30,45)*MIN : rnd(30,60)*MIN;
+  const life = urg==="express"? rnd(6,9)*MIN : urg==="priority"? rnd(12,18)*MIN : rnd(30,60)*MIN;
   const j = {id:nid("j"), base:base.id, cargo, weight, miles, urg, from, to, posted:S.clock, expires: urg==="standard" ? null : S.clock+life, routed:false};
   j.pay = payFor(miles, weight, cargo, urg);
   S.jobs.push(j);
@@ -193,7 +195,7 @@ function freeDrivers(lic, cargo){
   if(lic==="cdl") return c[0]?[c[0]]:null;
   return c.length>=2?[c[0],c[1]]:null;
 }
-const driveMs = (miles, sec, slow, f) => (sec ? sec*1000 : miles/AVG_MPH_NO_ROUTE*3600e3) * slow * f * DRIVE_TIME_FACTOR;
+const driveMs = (miles, slow, f) => (1 + miles/30) * MIN * slow * f;   // original pace: 1 min + 1 min per 30 road miles
 function handleMs(j){ // loading or unloading time for this load
   const m = j.cargo==="vehicles" ? LOAD_BASE_MIN + LOAD_MIN_PER_CAR*j.weight : LOAD_BASE_MIN + LOAD_MIN_PER_1000LB*j.weight/1000;
   return m*MIN;
@@ -211,7 +213,7 @@ function planTrip(v, j, drivers){
   const lv = Math.max(...drivers.map(drvLevel));
   const f = 1-0.03*(lv-1);
   const ld = handleMs(j), lu = handleMs(j);
-  const tDead = dead<0.5 ? 0.5*MIN : driveMs(dead, 0, t.slow, f), tHaul = driveMs(j.miles, j.sec, t.slow, f), tBack = back<0.5 ? 0.5*MIN : driveMs(back, 0, t.slow, f);
+  const tDead = Math.max(0.2*MIN, dead/30/2*MIN*f), tHaul = driveMs(j.miles, t.slow, f), tBack = Math.max(0.2*MIN, back/30/2*MIN*f);
   const cut = drivers.reduce((s,d)=>s+DRIVER_KIND[d.kind].cut+(d.hazmat?0.03:0),0);
   return {dead, back, tDead, ld, lu, tHaul, tBack, total:tDead+ld+tHaul+lu+tBack, deliverIn:tDead+ld+tHaul+lu, cut, bonus:1+0.02*(lv-1)};
 }
