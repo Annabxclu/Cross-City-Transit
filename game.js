@@ -118,7 +118,7 @@ const homePt = v => v.yard ? yardPt(v.yard) : basePt(baseById(v.base));
 const yardStop = y => ({lat:y.lat, lon:y.lon, c:nearestCity(y), yard:y.id, biz:"Rail yard", name:y.n, label:`${y.n}, ${y.city} ${y.s}`});
 const trainSlots = (v, ct) => { const n = (v.cars||{})[ct]||0; return RAILCARS[ct].unit ? n*RAILCARS[ct].cap : n; };
 const trainCarCount = v => Object.values(v.cars||{}).reduce((a,b)=>a+b,0);
-const railUnitWord = (ct, n) => RAILCARS[ct].unit ? `${n} container${n>1?"s":""}` : `${n} carload${n>1?"s":""}`;
+const railUnitWord = (ct, n) => RAILCARS[ct].unit ? `${n} container${n>1?"s":""}` : `${n} ${RAILCARS[ct].n.toLowerCase()} carload${n>1?"s":""}`;
 const vehValue = v => TYPE[v.type].price + Object.entries(v.cars||{}).reduce((a,[k,n])=>a+RAILCARS[k].price*n,0);
 function railUsed(tr, ct){ return openLoads(tr).filter(l=>l.job.carType===ct).reduce((n,l)=>n+l.job.units,0); }
 function capText(v, extra){
@@ -887,6 +887,15 @@ $("#zArea").onclick=()=>{ if(S){ const b=L.latLngBounds(S.bases.map(x=>{const p=
 
 /* ---------------- Panel ---------------- */
 function evChip(j){ return `<span class="chip evchip" style="--ev:${j.evColor||"#7b3fb5"}"><i></i>${esc(j.item||"Event load")} · +25%</span>`; }
+// What a rail job needs, with what you already have.
+function railNeeds(j){
+  const car = RAILCARS[j.carType], carN = car.n.toLowerCase();
+  const need = car.unit ? `${j.units} container${j.units>1?"s":""} of space: ${Math.ceil(j.units/car.cap)} ${carN}${Math.ceil(j.units/car.cap)>1?"s":""} (each holds ${car.cap})` : `${j.units} ${carN}${j.units>1?"s":""}, one per carload`;
+  const best = Math.max(0, ...S.vehicles.filter(isTrain).map(v=>trainSlots(v, j.carType)));
+  const loco = LOCOS.filter(l=>l.leg>=j.miles)[0];
+  const have = S.vehicles.some(isTrain) ? (best>=j.units ? `<span class="ok">Your train has room</span>` : `<span class="need">Your best train has ${best} ${car.unit?"container slots":carN+(best===1?"":"s")}</span>`) : `<span class="need">You have no trains yet</span>`;
+  return `<div class="needs"><b>Needs:</b> ${esc(need)} · a locomotive with ${j.miles}+ mi range${loco?` (${esc(loco.n.toLowerCase())})`:""} · an engineer<br>${have}</div>`;
+}
 function cargoChip(c){ return `<span class="chip" style="color:var(--c-${c})"><i></i><span style="color:var(--ink)">${esc(CARGO[c].n)}</span></span>`; }
 function urgTag(u){ return u==="standard"?"":`<span class="urg ${u}">${u}</span>`; }
 const MENU_PAGES = {shop:"Shop", crew:"Crew", tasks:"Tasks", log:"Log", company:"Company"};
@@ -918,7 +927,7 @@ function jobCard(j){
     <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${j.rail?`<span class="chip railchip"><i></i>Rail</span>`:""}${j.event?evChip(j):""}${cargoChip(j.cargo)}${urgTag(j.urg)}</div><span class="pay">${money(j.pay)}</span></div>
     <div class="route"><b>${esc(j.from.name||j.from.biz)}</b> <span class="arrow">→</span> <b>${esc(j.to.name||j.to.biz)}</b><br><span class="hint">${esc(addrLine(j.from))} → ${esc(addrLine(j.to))}</span></div>
     <div class="meta"><span class="num">${weightStr(j)}</span><span class="num">${j.routed?"":"about "}${j.miles} mi</span>${j.expires?`<span>expires in <span class="num" data-exp="${j.expires}">${dur(j.expires-S.clock)}</span></span>`:""}</div>
-    ${st.can?`<span class="ok">${esc(st.opts[0].v.n)} · ${st.opts[0].r.plan.adding?"add to its trip · ":""}delivers in ${dur(st.opts[0].r.plan.deliverIn)}</span>`:`<span class="need">${esc(st.why)}</span>`}
+    ${st.can?`<span class="ok">${esc(st.opts[0].v.n)} · ${st.opts[0].r.plan.adding?"add to its trip · ":""}delivers in ${dur(st.opts[0].r.plan.deliverIn)}</span>`:j.rail?railNeeds(j):`<span class="need">${esc(st.why)}</span>`}
   </button>`;
 }
 function payBreakdown(j){
@@ -946,6 +955,7 @@ function dispatchCard(j){
       <span class="line"></span><span class="hint"><span class="num">${weightStr(j)}</span> · <span class="num">${j.miles} mi</span> ${j.routing?(j.rail?"· checking track":"· checking roads"):j.path?(j.rail?"by rail":"by road"):"(estimate)"}</span>
       <span class="dot end"></span><span><b>${esc(j.to.name||j.to.biz)}</b> · ${esc(j.to.biz)}<br><span class="hint">${esc(addrLine(j.to))}</span></span></div>
     ${payBreakdown(j)}
+    ${j.rail?railNeeds(j):""}
     <div class="btnrow"><button class="btn ghost sm" data-act="fly" data-id="${j.id}">Show route on map</button></div>
     ${opts}
   </section>`;
@@ -1094,7 +1104,7 @@ function renderShop(){
 }
 function renderCrew(){
   const L_ = level();
-  let h = `<section class="sec"><h2>Hire</h2>
+  let h = `<section class="sec ${cz("c-hire")}">${secHead("c-hire","Hire")}
     <div class="card"><div class="row"><b>Driver</b><span class="num">${money(1000)}</span></div><p class="hint">Drives vans, box trucks and reefer box trucks. One-time hiring fee, no cut of the pay.</p>
       <div class="btnrow"><button class="btn sm" data-act="hire" data-kind="std" ${S.cash<1000?"disabled":""}>Hire driver</button></div></div>
     <div class="card ${L_<6?"dim":""}"><div class="row"><b>CDL driver</b><span class="num">${money(5000)}</span></div><p class="hint">Drives every truck, including semis. One-time hiring fee, no cut of the pay.</p>
@@ -1102,13 +1112,13 @@ function renderCrew(){
     <div class="card ${L_<RAIL_LVL?"dim":""}"><div class="row"><b>Engineer</b><span class="num">${money(ENGINEER.fee)}</span></div><p class="hint">Drives one train. One-time hiring fee, no cut of the pay.</p>
       ${L_<RAIL_LVL?`<span class="lock">Unlocks at level ${RAIL_LVL}</span>`:`<div class="btnrow"><button class="btn sm" data-act="hire" data-kind="eng" ${S.cash<ENGINEER.fee?"disabled":""}>Hire engineer</button></div>`}</div>
   </section>
-  <section class="sec"><div class="sec-head"><h2>Drivers</h2><span class="hint num">${S.drivers.filter(d=>!d.busy).length} free</span></div><div class="list">`;
+  <section class="sec ${cz("c-drivers")}">${secHead("c-drivers","Drivers",`<span class="hint num">${S.drivers.length} · ${S.drivers.filter(d=>!d.busy).length} free</span>`)}<div class="list">`;
   for(const d of S.drivers){
     h += `<div class="card"><div class="row"><b>${esc(d.name)}</b><span class="status ${d.busy?"busy":"idle"}">${d.busy?"On a job":"Free"}</span></div>
       <div class="meta"><span>${DRIVER_KIND[d.kind].n}${d.hazmat?" · hazmat":""}</span><span>${d.jobs} jobs driven</span></div>
       ${d.kind==="cdl"&&!d.hazmat&&L_>=18?`<div class="btnrow"><button class="btn ghost sm" data-act="hazmat" data-id="${d.id}" ${S.cash<HAZMAT_PRICE||d.busy?"disabled":""}>Hazmat training · ${money(HAZMAT_PRICE)}</button></div>`:""}</div>`;
   }
-  h += `</div></section><section class="sec"><h2>Dispatchers</h2><p class="hint">A dispatcher sends idle vehicles at one hub on the best-paying job they can take, even while you are away. Takes 5% of the jobs they assign.</p>`;
+  h += `</div></section><section class="sec ${cz("c-disp")}">${secHead("c-disp","Dispatchers",`<span class="hint num">${S.bases.filter(b=>b.dispatcher).length} on duty</span>`)}<p class="hint">A dispatcher sends idle vehicles at one hub on the best-paying job they can take, even while you are away. Takes 5% of the jobs they assign.</p>`;
   if(L_<DISPATCH_LVL) h += `<div class="card dim"><span class="lock">Unlocks at level ${DISPATCH_LVL}</span></div>`;
   else h += S.bases.map(b=>`<div class="card"><div class="row"><b>${esc(baseName(b))}</b><span class="status ${b.dispatcher?"idle":""}">${b.dispatcher?"Dispatcher on duty":"No dispatcher"}</span></div>
       <div class="btnrow">${b.dispatcher?`<button class="btn ghost sm" data-act="disp" data-id="${b.id}">Let go</button>`:`<button class="btn sm" data-act="disp" data-id="${b.id}" ${S.cash<DISPATCH_PRICE?"disabled":""}>Hire · ${money(DISPATCH_PRICE)}</button>`}</div></div>`).join("");
