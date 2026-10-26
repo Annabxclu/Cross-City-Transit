@@ -476,6 +476,16 @@ function dispatch(j, v, viaDispatcher){
   if(!simulating) roadTrip(tr);
   return tr;
 }
+// Route lookups can fail now and then (busy free servers). Every 15 seconds, try again for anything
+// still drawn as a straight dashed placeholder: trip legs in progress and jobs on the board.
+function retryRoutes(){
+  if(!S || simulating) return;
+  S.trips.forEach(roadTrip);
+  for(const j of S.jobs){
+    if(j.air || j.path || j.routing || (j.routeTries||0) >= 6) continue;
+    j.routeTries = (j.routeTries||0) + 1; j.routed = false; routeJob(j);
+  }
+}
 // Swap straight placeholder lines for real road geometry (timing stays as planned).
 function roadTrip(tr){
   for(const s of tr.segs){
@@ -1605,6 +1615,7 @@ function start(){
   } else showStart();
   setInterval(tick, 250);
   setInterval(liveText, 1000);
+  setInterval(retryRoutes, 15000);
   setInterval(save, 5000);
   document.addEventListener("visibilitychange", save);
   requestAnimationFrame(frame);
