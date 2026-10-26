@@ -73,7 +73,7 @@ const TYPES = [
 ];
 const TYPE = Object.fromEntries(TYPES.map(t=>[t.id,t]));
 const DRIVER_KIND = {
-  owner:{n:"Owner",cut:0}, std:{n:"Driver",cut:.15,fee:1000,lvl:1}, cdl:{n:"CDL driver",cut:.22,fee:5000,lvl:6}
+  owner:{n:"Owner",cut:0}, std:{n:"Driver",cut:0,fee:1000,lvl:1}, cdl:{n:"CDL driver",cut:0,fee:5000,lvl:6}
 };
 const FIRST = ["Marcus","Dana","Luis","Keisha","Travis","Rosa","Dwayne","Megan","Andre","Tasha","Cody","Imani","Hector","Brianna","Jamal","Lena","Wyatt","Carmen","Darnell","Shelby","Omar","Kayla","Reggie","Nina"];
 const LAST = ["Brooks","Ortiz","Hale","Washington","Price","Nguyen","Carter","Reyes","Mills","Jenkins","Parker","Diaz","Cole","Bishop","Foster","Ramos","Banks","Lowe","Grant","Avery"];

@@ -214,12 +214,11 @@ function startPt(v){
 function planTrip(v, j, drivers){
   const t = TYPE[v.type], bp = basePt(baseById(v.base)), sp = startPt(v);
   const dead = estMi(sp, j.from), back = estMi(j.to, bp);
-  const lv = Math.max(...drivers.map(drvLevel));
-  const f = 1-0.03*(lv-1);
+  const f = 1;   // no driver speed levels
   const ld = handleMs(j), lu = handleMs(j);
   const tDead = Math.max(0.2*MIN, dead/30/2*MIN*f), tHaul = driveMs(j.miles, t.slow, f), tBack = Math.max(0.2*MIN, back/30/2*MIN*f);
-  const cut = drivers.reduce((s,d)=>s+DRIVER_KIND[d.kind].cut+(d.hazmat?0.03:0),0);
-  return {dead, back, tDead, ld, lu, tHaul, tBack, total:tDead+ld+tHaul+lu+tBack, deliverIn:tDead+ld+tHaul+lu, cut, bonus:1+0.02*(lv-1)};
+  const cut = 0;  // drivers take no cut of the pay
+  return {dead, back, tDead, ld, lu, tHaul, tBack, total:tDead+ld+tHaul+lu+tBack, deliverIn:tDead+ld+tHaul+lu, cut, bonus:1};
 }
 function vehicleFor(v, j){
   const t = TYPE[v.type];
@@ -285,7 +284,7 @@ function deliver(tr){
   const before = level();
   S.cash += net; S.earned += net; S.xp += tr.gross/100; S.jobsDone++;
   const v = S.vehicles.find(x=>x.id===tr.v); if(v){ v.jobs++; v.miles=(v.miles||0)+(tr.deadMi||0)+(tr.haulMi||tr.job.miles||0); }
-  tr.drivers.forEach(id=>{const d=S.drivers.find(x=>x.id===id); if(d){d.jobs++; d.earned+=tr.gross*DRIVER_KIND[d.kind].cut;}});
+  tr.drivers.forEach(id=>{const d=S.drivers.find(x=>x.id===id); if(d){d.jobs++;}});
   if(awayLog){awayLog.jobs++; awayLog.net+=net; logEvent(`<b>${esc(v?v.n:"Truck")}</b> delivered ${esc(CARGO[tr.job.cargo].n.toLowerCase())} to ${esc(tr.job.to.name||cityName(tr.job.to.c))} <span class="num">+${money(net)}</span> (while you were away)`, simWhen());}
   else toast(`<b>${esc(v?v.n:"Truck")}</b> delivered ${esc(CARGO[tr.job.cargo].n.toLowerCase())} to ${esc(tr.job.to.name||tr.job.to.biz)}, ${esc(cityName(tr.job.to.c))} <span class="num">+${money(net)}</span>`);
   const after = level();
@@ -527,7 +526,7 @@ function dispatchCard(j){
     opts = `<div class="opts">${st.opts.map(o=>{const p=o.r.plan;const net=Math.round(j.pay*p.bonus*(1-p.cut));
       return `<label class="opt"><input type="radio" name="veh" value="${o.v.id}" ${o.v.id===chosenVeh?"checked":""}>
       <span><b>${esc(o.v.n)}</b> · ${esc(TYPE[o.v.type].n)}<small>${esc(o.r.drivers.map(d=>d.name).join(" + "))} · ${p.dead>1?`${p.dead} mi to pickup (${dur(p.tDead)}) · `:""}loading ${dur(p.ld)} · drive ${dur(p.tHaul)} · unloading ${dur(p.lu)}<br>Delivers in ${dur(p.deliverIn)}, back at the hub in ${dur(p.total)}</small></span>
-      <span class="pay" title="After driver pay">${money(net)}</span></label>`;}).join("")}</div>
+      <span class="pay" title="Job pay">${money(net)}</span></label>`;}).join("")}</div>
       <div class="btnrow"><button class="btn" data-act="go" data-id="${j.id}" ${j.routing?"disabled":""}>${j.routing?"Finding route…":"Dispatch"}</button><button class="btn ghost" data-act="unsel">Close</button></div>`;
   } else {
     opts = `<p class="need" style="font-size:13px;margin:0">${esc(st.why)}</p><div class="btnrow"><button class="btn ghost" data-act="unsel">Close</button>${st.soon?"":`<button class="btn ghost" data-act="tab" data-tab="shop">Open shop</button>`}</div>`;
@@ -623,16 +622,15 @@ function renderShop(){
 function renderCrew(){
   const L_ = level();
   let h = `<section class="sec"><h2>Hire</h2>
-    <div class="card"><div class="row"><b>Driver</b><span class="num">${money(1000)}</span></div><p class="hint">Drives vans and box trucks. Takes 15% of each job.</p>
+    <div class="card"><div class="row"><b>Driver</b><span class="num">${money(1000)}</span></div><p class="hint">Drives vans, box trucks and reefer box trucks. One-time hiring fee, no cut of the pay.</p>
       <div class="btnrow"><button class="btn sm" data-act="hire" data-kind="std" ${S.cash<1000?"disabled":""}>Hire driver</button></div></div>
-    <div class="card ${L_<6?"dim":""}"><div class="row"><b>CDL driver</b><span class="num">${money(5000)}</span></div><p class="hint">Drives every truck, including semis. Takes 22% of each job.</p>
+    <div class="card ${L_<6?"dim":""}"><div class="row"><b>CDL driver</b><span class="num">${money(5000)}</span></div><p class="hint">Drives every truck, including semis. One-time hiring fee, no cut of the pay.</p>
       ${L_<6?`<span class="lock">Unlocks at level 6</span>`:`<div class="btnrow"><button class="btn sm" data-act="hire" data-kind="cdl" ${S.cash<5000?"disabled":""}>Hire CDL driver</button></div>`}</div>
   </section>
   <section class="sec"><div class="sec-head"><h2>Drivers</h2><span class="hint num">${S.drivers.filter(d=>!d.busy).length} free</span></div><div class="list">`;
   for(const d of S.drivers){
-    const lv = drvLevel(d), nx = DRV_LEVELS[lv];
     h += `<div class="card"><div class="row"><b>${esc(d.name)}</b><span class="status ${d.busy?"busy":"idle"}">${d.busy?"On a job":"Free"}</span></div>
-      <div class="meta"><span>${DRIVER_KIND[d.kind].n}${d.hazmat?" · hazmat":""}</span><span>Level ${lv}${lv<5?` · ${nx-d.jobs} jobs to next`:""}</span><span>${d.kind==="owner"?"No cut":Math.round((DRIVER_KIND[d.kind].cut+(d.hazmat?.03:0))*100)+"% cut"}</span>${lv>1?`<span>+${(lv-1)*3}% speed</span>`:""}</div>
+      <div class="meta"><span>${DRIVER_KIND[d.kind].n}${d.hazmat?" · hazmat":""}</span><span>${d.jobs} jobs driven</span></div>
       ${d.kind==="cdl"&&!d.hazmat&&L_>=18?`<div class="btnrow"><button class="btn ghost sm" data-act="hazmat" data-id="${d.id}" ${S.cash<HAZMAT_PRICE||d.busy?"disabled":""}>Hazmat training · ${money(HAZMAT_PRICE)}</button></div>`:""}</div>`;
   }
   h += `</div></section><section class="sec"><h2>Dispatchers</h2><p class="hint">A dispatcher sends idle vehicles at one hub on the best-paying job they can take, even while you are away. Takes 5% of the jobs they assign.</p>`;
