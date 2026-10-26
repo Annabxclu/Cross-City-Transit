@@ -29,14 +29,14 @@
 
 html,body{height:100%}
 body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:14px;line-height:1.45;display:flex;flex-direction:column;overflow:hidden}
-body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--sign)}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--hdr,var(--sign))}
 button,select,input{font:inherit;color:inherit}
 button{cursor:pointer}
 :focus-visible{outline:2px solid var(--amber);outline-offset:2px}
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
 
 /* Sign header */
-.sign{background:var(--sign);color:var(--sign-ink);border-bottom:3px solid var(--sign-line);position:relative;z-index:1200}
+.sign{--sign:var(--hdr,#1e5a3c);--sign-ink:var(--hdr-ink,#f3f7f1);--sign-line:var(--hdr-line,#8fb6a0);background:var(--sign);color:var(--sign-ink);border-bottom:3px solid var(--sign-line);position:relative;z-index:1200}
 .sign-in{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
   padding-block:10px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 .brand{display:flex;align-items:center;gap:12px;min-width:0}
@@ -48,7 +48,7 @@ button{cursor:pointer}
 .stat{display:flex;flex-direction:column;gap:1px}
 .stat-k{font-family:var(--display);font-size:12px;letter-spacing:.12em;text-transform:uppercase;opacity:.75}
 .stat-v{font-family:var(--mono);font-size:16px;font-variant-numeric:tabular-nums}
-.xpbar{width:110px;height:5px;background:rgba(255,255,255,.22);border-radius:3px;overflow:hidden;margin-top:3px}
+.xpbar{width:110px;height:5px;background:color-mix(in srgb, var(--sign-ink) 25%, transparent);border-radius:3px;overflow:hidden;margin-top:3px}
 .xpbar i{display:block;height:100%;background:var(--sign-ink)}
 
 /* App grid */
@@ -283,3 +283,12 @@ label.fld{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(
 .card.active .lst{color:var(--blue)}
 .countdown{font-size:13px}
 .countdown b{font-weight:500;font-size:14px}
+
+/* Settings */
+.swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px}
+.swatch{display:flex;flex-direction:column;align-items:stretch;gap:5px;border:1px solid var(--line);border-radius:6px;background:var(--surface);padding:6px;font-size:12.5px;color:var(--ink)}
+.swatch i{display:block;height:28px;border-radius:4px}
+.swatch[aria-pressed="true"]{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
+.custom-color{display:flex;align-items:center;gap:10px;font-size:13px}
+.custom-color input[type=color]{width:44px;height:32px;border:1px solid var(--line);border-radius:5px;padding:2px;background:var(--surface)}
+.dialog .sign-strip{background:var(--hdr,var(--sign));color:var(--hdr-ink,var(--sign-ink));border-bottom-color:var(--hdr-line,var(--sign-line))}

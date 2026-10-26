@@ -900,7 +900,7 @@ function railNeeds(j){
 }
 function cargoChip(c){ return `<span class="chip" style="color:var(--c-${c})"><i></i><span style="color:var(--ink)">${esc(CARGO[c].n)}</span></span>`; }
 function urgTag(u){ return u==="standard"?"":`<span class="urg ${u}">${u}</span>`; }
-const MENU_PAGES = {fleet:"Fleet", shop:"Shop", crew:"Crew", tasks:"Tasks", log:"Log", company:"Company"};
+const MENU_PAGES = {fleet:"Fleet", shop:"Shop", crew:"Crew", tasks:"Tasks", log:"Log", company:"Company", settings:"Settings"};
 function markTabs(){
   document.querySelectorAll(".tab[data-tab]").forEach(b=>b.setAttribute("aria-selected", b.dataset.tab===tab));
   const inMenu = tab in MENU_PAGES;
@@ -1162,6 +1162,28 @@ function levelBar(){
     <div class="prog"><i style="width:${Math.min(100,(S.xp-xpNeed(L_))/(need-xpNeed(L_))*100)}%;background:var(--sign)"></i></div>
     <p class="hint">${Math.ceil(need-S.xp).toLocaleString("en-US")} XP to level ${L_+1}. Each delivery earns 1 XP per $100 it pays.${nxt?` Next unlock: ${esc(nxt[1])} at level ${nxt[0]}.`:""}</p></section>`;
 }
+/* ---------------- Settings: header color (saved in this browser) ---------------- */
+const HEADER_COLORS = [["Green","#1e5a3c"],["Red","#a3262a"],["Blue","#1f4fa3"],["Navy","#1b2a4a"],["Purple","#5b2d8c"],["Orange","#b85a12"],["Teal","#0f6b6b"],["Charcoal","#2b2f33"]];
+function headerColor(){ try{ return localStorage.getItem("freight-dispatch-header") || ""; }catch(_){ return ""; } }
+function applyHeaderColor(hex){
+  const r = document.documentElement.style;
+  if(!/^#[0-9a-f]{6}$/i.test(hex||"")){ ["--hdr","--hdr-ink","--hdr-line"].forEach(p=>r.removeProperty(p)); return; }
+  const [R_,G,B] = [1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(v=>v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4));
+  const light = 0.2126*R_ + 0.7152*G + 0.0722*B > 0.35;     // light colors get dark text
+  r.setProperty("--hdr", hex); r.setProperty("--hdr-ink", light ? "#16201d" : "#f6f8f7");
+  r.setProperty("--hdr-line", `color-mix(in srgb, ${hex} 55%, ${light ? "#000" : "#fff"})`);
+}
+function setHeaderColor(hex){ try{ hex ? localStorage.setItem("freight-dispatch-header", hex) : localStorage.removeItem("freight-dispatch-header"); }catch(_){} applyHeaderColor(hex); }
+function renderSettings(){
+  const cur = (headerColor() || HEADER_COLORS[0][1]).toLowerCase();
+  return `<section class="sec"><h2>Settings</h2><p class="hint">These settings are saved in this browser only.</p></section>
+    <section class="sec"><h3>Header color</h3>
+      <div class="swatches">${HEADER_COLORS.map(([n,c])=>`<button class="swatch" data-act="hdrColor" data-c="${c}" aria-pressed="${cur===c.toLowerCase()}"><i style="background:${c}"></i>${n}</button>`).join("")}</div>
+      <label class="custom-color"><input type="color" id="hdrCustom" value="${cur}"> Pick any color</label>
+      <div class="btnrow"><button class="btn ghost sm" data-act="hdrColor" data-c="">Reset to green</button></div>
+    </section>`;
+}
+applyHeaderColor(headerColor());
 function renderCompany(){
   const L_ = level(), reset = pendingConfirm==="reset";
   return `<section class="sec"><h2>${esc(S.company)}</h2></section>${levelBar()}<section class="sec">
@@ -1204,7 +1226,7 @@ function renderPanel(){
   if(!S) return;
   const body = $("#panelBody"), st = body.scrollTop;
   const ae = document.activeElement, keep = ae && ae.id && body.contains(ae) && ae.tagName==="INPUT" ? {id:ae.id, v:ae.value, a:ae.selectionStart, b:ae.selectionEnd} : null;
-  body.innerHTML = tab==="jobs"?renderJobs("truck"):tab==="rail"?renderJobs("rail"):tab==="air"?renderAir():tab==="fleet"?renderFleet():tab==="shop"?renderShop():tab==="crew"?renderCrew():tab==="log"?renderLog():tab==="tasks"?renderTasks():renderCompany();
+  body.innerHTML = tab==="jobs"?renderJobs("truck"):tab==="rail"?renderJobs("rail"):tab==="air"?renderAir():tab==="fleet"?renderFleet():tab==="shop"?renderShop():tab==="crew"?renderCrew():tab==="log"?renderLog():tab==="tasks"?renderTasks():tab==="settings"?renderSettings():renderCompany();
   body.scrollTop = st;
   if(keep){ const el = document.getElementById(keep.id); if(el){ el.value = keep.v; el.focus(); try{ el.setSelectionRange(keep.a, keep.b); }catch(_){} } }
   renderHeader();
@@ -1281,6 +1303,7 @@ $("#panelBody").addEventListener("click", e=>{
   if(a==="setLvl"){ if(!S.test) return; const L_ = +$("#testLvl").value; S.xp = xpNeed(L_); logEvent(`Test mode: set to level ${L_}`); drawYards(); save(); refresh(); return; }
   if(a==="addCash"){ if(!S.test) return; const n = +el.dataset.n; S.cash += n; logEvent(`Test mode: added ${money(n)}`); save(); refresh(); return; }
   if(a==="toggleSec"){ const k = el.dataset.k; collapsed.has(k) ? collapsed.delete(k) : collapsed.add(k); try{ localStorage.setItem("freight-dispatch-collapsed", JSON.stringify([...collapsed])); }catch(_){} renderPanel(); return; }
+  if(a==="hdrColor"){ setHeaderColor(el.dataset.c); renderPanel(); return; }
   if(a==="askSell"){ pendingConfirm="sell"+id; renderPanel(); return; }
   if(a==="sell"){ const v=S.vehicles.find(x=>x.id===id); if(v&&!tripOf(v)){S.cash+=vehValue(v)*0.6; S.vehicles=S.vehicles.filter(x=>x!==v);} pendingConfirm=null; save(); refresh(); return; }
   if(a==="cancel"){ pendingConfirm=null; renderPanel(); return; }
@@ -1295,7 +1318,7 @@ $("#panelBody").addEventListener("click", e=>{
 });
 $("#panelBody").addEventListener("keydown", e=>{ if(e.key==="Enter" && e.target.id?.startsWith("ren-")){ e.preventDefault(); $(`[data-act=ren][data-id="${e.target.id.slice(4)}"]`)?.click(); }
   if(e.key==="Enter" && e.target.id?.startsWith("renh-")){ e.preventDefault(); $(`[data-act=renHub][data-id="${e.target.id.slice(5)}"]`)?.click(); } if(e.key==="Escape" && e.target.id?.startsWith("ren-")){ pendingConfirm=null; renderPanel(); } });
-$("#panelBody").addEventListener("change", e=>{ if(e.target.name==="veh") chosenVeh=e.target.value; if(e.target.id==="testToggle"){ S.test = e.target.checked; save(); renderPanel(); } });
+$("#panelBody").addEventListener("change", e=>{ if(e.target.name==="veh") chosenVeh=e.target.value; if(e.target.id==="hdrCustom"){ setHeaderColor(e.target.value); renderPanel(); } if(e.target.id==="testToggle"){ S.test = e.target.checked; save(); renderPanel(); } });
 document.querySelectorAll(".tab[data-tab]").forEach(b=>b.addEventListener("click",()=>{ closeMenu(); setTab(b.dataset.tab); }));
 // Menu dropdown for Fleet, Shop, Crew, Tasks, Log and Company
 function closeMenu(){ $("#menu").hidden = true; $("#menuBtn").setAttribute("aria-expanded","false"); }
