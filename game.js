@@ -1328,9 +1328,10 @@ function renderHeader(){
   $("#hdrLvl").textContent = `Level ${L_} · ${Math.floor(S.xp-a).toLocaleString("en-US")}/${(b-a).toLocaleString("en-US")} XP`;
   $("#hdrXp").style.width = (L_>=50?100:Math.min(100,(S.xp-a)/(b-a)*100)) + "%";
   $("#hdrTrips").textContent = S.trips.length;
-  $("#jobBadge").textContent = S.jobs.filter(j=>jobKind(j)==="truck" && jobStatus(j).can).length;
-  const ac = S.jobs.filter(j=>j.air && jobStatus(j).can).length, ab = $("#airBadge"); ab.textContent = ac; ab.hidden = !ac;
-  const rc = S.jobs.filter(j=>j.rail && jobStatus(j).can).length, rb = $("#railBadge"); rb.textContent = rc; rb.hidden = !rc;
+  // Each job tab shows how many jobs are on its board (shown once that kind of job is unlocked).
+  for(const [id, kind, lvl] of [["#jobBadge","truck",1], ["#railBadge","rail",RAIL_LVL], ["#airBadge","air",AIR_LVL]]){
+    const b = $(id); b.textContent = S.jobs.filter(j=>jobKind(j)===kind).length; b.hidden = level() < lvl;
+  }
   const cc = claimableCount(); for(const id of ["#taskBadge","#taskBadge2"]){ const tb = $(id); tb.textContent = cc; tb.hidden = !cc; }
 }
 function renderPanel(){
