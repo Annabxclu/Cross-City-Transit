@@ -60,7 +60,7 @@ const PRODUCERS = {general:["Warehouse","Factory","Distribution Center"],parcels
 const ACCEPTORS = {general:["Retail Store","Grocery Distribution Center","Hardware Store"],parcels:["Retail Store","Hospital","Office Park"],furniture:["Furniture Store","Hotel"],pallets:["Grocery Distribution Center","Big-Box Store","Warehouse"],refrigerated:["Grocery Distribution Center","Restaurant Supplier","Hospital"],lumber:["Construction Site","Hardware Store"],steel:["Construction Site","Manufacturing Plant"],machinery:["Construction Site","Manufacturing Plant","Farm"],liquids:["Manufacturing Plant","Water Treatment Plant"],hazmat:["Fuel Depot","Airport Fuel Farm"],vehicles:["Car Dealership"]};
 
 const TYPES = [
-  {id:"van",n:"Cargo van",price:35000,cap:3000,leg:300,cargo:["general","parcels"],lic:"std",lvl:1,big:false},
+  {id:"van",n:"Cargo van",price:8000,cap:3000,leg:300,cargo:["general","parcels"],lic:"std",lvl:1,big:false},
   {id:"box",n:"Box truck",price:45000,cap:10000,leg:400,cargo:["general","parcels","furniture"],lic:"std",lvl:2,big:false},
   {id:"reeferbox",n:"Reefer box truck",price:70000,cap:9000,leg:400,cargo:["refrigerated"],lic:"std",lvl:5,big:false},
   {id:"straight",n:"Straight truck (26 ft)",price:90000,cap:18000,leg:600,cargo:["general","pallets"],lic:"cdl",lvl:6,big:true},
