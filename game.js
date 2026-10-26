@@ -33,6 +33,18 @@ function payFor(miles, weight, cargo, urg){
 function offsetPt(lat, lon, miles, ang){
   return {lat: lat + Math.sin(ang)*miles/MI_DEG, lon: lon + Math.cos(ang)*miles/(MI_DEG*Math.cos(lat*Math.PI/180))};
 }
+function bizName(type){
+  const suf = pick(NAME_SUFFIX[type] || [type]);
+  const word = Math.random()<0.25 ? `${pick(LAST)} ${pick(["& Sons","Brothers","& Co."])}` : pick(NAME_WORDS);
+  return `${word} ${suf}`;
+}
+const houseNo = () => Math.round(rnd(1,99))*100 + Math.round(rnd(0,99));
+function addrLine(p){
+  const street = p.street || pick(FALLBACK_STREETS);
+  if(!p.street) p.street = street;
+  const far = hav(p, CITIES[p.c]) > 12;
+  return `${p.num||100} ${street}, ${far?"near ":""}${cityName(p.c)}`;
+}
 const cityPt = i => ({lat:CITIES[i].lat, lon:CITIES[i].lon});
 const basePt = b => b.pt || cityPt(b.city);
 
@@ -58,7 +70,8 @@ function getRoute(a, b){
       const js = await res.json();
       const r = js.routes && js.routes[0]; if(!r) throw new Error("no route");
       const coords = thin(r.geometry.coordinates.map(c=>[+c[1].toFixed(5), +c[0].toFixed(5)]), 600);
-      return {mi: r.distance/1609.34, path: coords};
+      const wp = js.waypoints||[];
+      return {mi: r.distance/1609.34, path: coords, names: wp.map(w=>w.name||""), locs: wp.map(w=>({lat:w.location[1], lon:w.location[0]}))};
     }catch(e){ routeCache.delete(k); return null; }
     finally{ await new Promise(r=>setTimeout(r, 700)); }  // be polite to the shared demo server
   });
@@ -74,16 +87,18 @@ let selectedJob = null, tab = "jobs", pendingConfirm = null, chosenVeh = null;
 const nid = p => p + (++S.idc);
 const level = () => levelOf(S.xp);
 const baseById = id => S.bases.find(b=>b.id===id);
+const hubCap = b => HUB_TIERS[b.tier||0].cap;
+const maxJobs = () => S.vehicles.length + 1;
 
 function newGame(co, cityIdx){
   S = {v:2, company:co, homeState:CITIES[cityIdx].s, clock:0, lastReal:Date.now(), speed:1, cash:50000, xp:0,
     earned:0, jobsDone:0, idc:0, payMult:1, bases:[], vehicles:[], drivers:[], jobs:[], trips:[], hired:0};
   const c = CITIES[cityIdx];
-  const b = {id:nid("b"), city:cityIdx, pt:offsetPt(c.lat,c.lon,rnd(1,3),rnd(0,6.28)), slots:4, dispatcher:false, nextSpawn:0, home:true};
+  const b = {id:nid("b"), city:cityIdx, pt:offsetPt(c.lat,c.lon,rnd(1,3),rnd(0,6.28)), tier:0, dispatcher:false, home:true};
   S.bases.push(b);
   S.drivers.push({id:nid("d"), name:"You", kind:"owner", jobs:0, busy:false, hazmat:false, earned:0});
   S.vehicles.push({id:nid("v"), type:"van", base:b.id, n:"Van 1", busy:false, jobs:0});
-  for(let k=0;k<8;k++) spawnJob(b);
+  S.nextJobAt = JOB_EVERY_MS; spawnJob(b); spawnJob(b);
 }
 
 /* ---------------- Jobs ---------------- */
@@ -92,7 +107,10 @@ function spawnJob(base, depth=0){
   const L = level();
   const ownedTypes = [...new Set(S.vehicles.map(v=>v.type))];
   const reach = TYPES.filter(t=>t.lvl<=L+4);
-  const t = (Math.random()<0.65 && ownedTypes.length) ? TYPE[pick(ownedTypes)] : pick(reach);
+  // Keep the board useful: while fewer jobs fit your fleet than you have vehicles, only post jobs you can run.
+  const fitting = S.jobs.filter(x=>S.vehicles.some(v=>{const tt=TYPE[v.type];return tt.cargo.includes(x.cargo)&&tt.cap>=x.weight&&tt.leg>=x.miles;})).length;
+  const ownOnly = fitting < S.vehicles.length;
+  const t = ((ownOnly || Math.random()<0.85) && ownedTypes.length) ? TYPE[pick(ownedTypes)] : pick(reach);
   const cargo = pick(t.cargo);
   if(cargo==="hazmat" && Math.random()<0.5 && depth<4) return spawnJob(base, depth+1);
   let weight;
@@ -111,16 +129,19 @@ function spawnJob(base, depth=0){
   }
   const oc = CITIES[origin], dc = CITIES[dest];
   const from = {c:origin, biz:pick(PRODUCERS[cargo]), ...offsetPt(oc.lat, oc.lon, rnd(0.5,4), rnd(0,6.28))};
+  from.name = bizName(from.biz); from.num = houseNo();
   let to;
   if(dest===origin){ to = {c:dest, ...offsetPt(from.lat, from.lon, rnd(4,22), rnd(0,6.28))}; }
   else to = {c:dest, ...offsetPt(dc.lat, dc.lon, rnd(0.5,4), rnd(0,6.28))};
   to.biz = pick(ACCEPTORS[cargo]); if(to.biz===from.biz) to.biz = ACCEPTORS[cargo][0];
+  to.name = bizName(to.biz); to.num = houseNo();
   const miles = estMi(from, to);
   const urg = Math.random()<0.07?"express":Math.random()<0.2?"priority":"standard";
   const life = urg==="express"? rnd(6,9)*MIN : urg==="priority"? rnd(12,18)*MIN : rnd(30,60)*MIN;
-  const j = {id:nid("j"), base:base.id, cargo, weight, miles, urg, from, to, posted:S.clock, expires:S.clock+life, routed:false};
+  const j = {id:nid("j"), base:base.id, cargo, weight, miles, urg, from, to, posted:S.clock, expires: urg==="standard" ? null : S.clock+life, routed:false};
   j.pay = payFor(miles, weight, cargo, urg);
   S.jobs.push(j);
+  if(!simulating) routeJob(j);
   return j;
 }
 // Fetch the real road route for a job, then quote it by road miles.
@@ -131,8 +152,14 @@ function routeJob(j){
     j.routing = false;
     if(!S || !S.jobs.includes(j)) return;
     j.routed = true;
-    if(r){ j.miles = Math.max(1, Math.round(r.mi)); j.path = r.path; j.pay = payFor(j.miles, j.weight, j.cargo, j.urg); }
-    if(j.id===selectedJob){ drawSelection(); renderPanel(); }
+    if(r){
+      j.miles = Math.max(1, Math.round(r.mi)); j.path = r.path; j.pay = payFor(j.miles, j.weight, j.cargo, j.urg);
+      if(r.locs && r.locs.length===2){ Object.assign(j.from, r.locs[0]); Object.assign(j.to, r.locs[1]); }
+      if(r.names){ j.from.street = r.names[0]; j.to.street = r.names[1]; }
+      const m = jobMarkers.get(j.id); if(m) m.setLatLng([j.from.lat, j.from.lon]);
+    }
+    if(j.id===selectedJob) drawSelection();
+    if(tab==="jobs") renderPanel();
   });
 }
 
@@ -229,11 +256,14 @@ function logic(){
     S.trips = S.trips.filter(tr=>S.clock<tr.endAt); changed = true;
   }
   const n0 = S.jobs.length;
-  S.jobs = S.jobs.filter(j=>j.expires>S.clock);
+  S.jobs = S.jobs.filter(j=>!j.expires || j.expires>S.clock);
   if(selectedJob && !S.jobs.find(j=>j.id===selectedJob)) selectedJob = null;
   if(S.jobs.length!==n0) changed = true;
-  for(const b of S.bases){
-    if(S.jobs.filter(j=>j.base===b.id).length<BOARD_PER_BASE && S.clock>=b.nextSpawn){ spawnJob(b); b.nextSpawn = S.clock + rnd(18,40)*1000; changed = true; }
+  // Mission Chief style: one new job every 30 seconds, up to one more than your vehicle count.
+  // An empty board refills right away so there is always something to do.
+  if(S.jobs.length < maxJobs() && (S.jobs.length===0 || S.clock >= (S.nextJobAt||0))){
+    const j = spawnJob(pick(S.bases)); S.nextJobAt = S.clock + JOB_EVERY_MS; changed = true;
+    if(j && !simulating && !awayLog) toast(`New job: <b>${esc(j.from.name)}</b> in ${esc(cityName(j.from.c))} · <span class="num">${money(j.pay)}</span>`, 3000);
   }
   for(const b of S.bases){
     if(!b.dispatcher) continue;
@@ -379,8 +409,8 @@ function jobCard(j){
   const st = jobStatus(j), local = j.from.c===j.to.c;
   return `<button class="card ${j.id===selectedJob?"sel":""} ${st.can?"":"dim"}" data-act="sel" data-id="${j.id}">
     <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${cargoChip(j.cargo)}${urgTag(j.urg)}</div><span class="pay">${money(j.pay)}</span></div>
-    <div class="route"><b>${esc(j.from.biz)}</b>, ${esc(cityName(j.from.c))} <span class="arrow">→</span> <b>${esc(j.to.biz)}</b>${local?" across town":`, ${esc(cityName(j.to.c))}`}</div>
-    <div class="meta"><span class="num">${weightStr(j)}</span><span class="num">${j.routed?"":"about "}${j.miles} mi</span><span>expires in <span class="num" data-exp="${j.expires}">${dur(j.expires-S.clock)}</span></span></div>
+    <div class="route"><b>${esc(j.from.name||j.from.biz)}</b> <span class="arrow">→</span> <b>${esc(j.to.name||j.to.biz)}</b><br><span class="hint">${esc(addrLine(j.from))} → ${esc(addrLine(j.to))}</span></div>
+    <div class="meta"><span class="num">${weightStr(j)}</span><span class="num">${j.routed?"":"about "}${j.miles} mi</span>${j.expires?`<span>expires in <span class="num" data-exp="${j.expires}">${dur(j.expires-S.clock)}</span></span>`:""}</div>
     ${st.can?`<span class="ok">${esc(st.opts[0].v.n)} · back in ${dur(st.opts[0].r.plan.total)}</span>`:`<span class="need">${esc(st.why)}</span>`}
   </button>`;
 }
@@ -399,9 +429,9 @@ function dispatchCard(j){
   }
   return `<section class="dispatch" aria-label="Dispatch job">
     <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${cargoChip(j.cargo)}${urgTag(j.urg)}</div><span class="pay" style="font-size:18px">${money(j.pay)}</span></div>
-    <div class="leg"><span class="dot"></span><span><b>${esc(j.from.biz)}</b>, ${esc(cityName(j.from.c))}</span>
-      <span class="line"></span><span class="hint"><span class="num">${weightStr(j)}</span> · <span class="num">${j.miles} mi</span> ${j.routing?"· checking roads":j.path?"by road":local?"across town":"(estimate)"}</span>
-      <span class="dot end"></span><span><b>${esc(j.to.biz)}</b>, ${esc(cityName(j.to.c))}</span></div>
+    <div class="leg"><span class="dot"></span><span><b>${esc(j.from.name||j.from.biz)}</b> · ${esc(j.from.biz)}<br><span class="hint">${esc(addrLine(j.from))}</span></span>
+      <span class="line"></span><span class="hint"><span class="num">${weightStr(j)}</span> · <span class="num">${j.miles} mi</span> ${j.routing?"· checking roads":j.path?"by road":"(estimate)"}</span>
+      <span class="dot end"></span><span><b>${esc(j.to.name||j.to.biz)}</b> · ${esc(j.to.biz)}<br><span class="hint">${esc(addrLine(j.to))}</span></span></div>
     <div class="btnrow"><button class="btn ghost sm" data-act="fly" data-id="${j.id}">Show route on map</button></div>
     ${opts}
   </section>`;
@@ -414,8 +444,12 @@ function renderJobs(){
   let h = "";
   if(sj) h += dispatchCard(sj);
   if(S.jobsDone<1 && !sj) h += `<p class="hint" style="color:var(--ink)">Tap an orange pin on the map, or pick a job below, then send your van. Gray pins need a vehicle you do not own yet.</p>`;
+  { const L_=level(), need=xpNeed(L_+1), left=Math.max(0,Math.ceil((need-S.xp)*100)), nxt=Object.entries(UNLOCKS).find(([k])=>+k>L_);
+    h += `<section class="sec"><div class="sec-head"><h3>Level ${L_} → ${L_+1}</h3><span class="hint num">${money(left)} to go</span></div>
+      <div class="prog"><i style="width:${Math.min(100,(S.xp-xpNeed(L_))/(need-xpNeed(L_))*100)}%;background:var(--sign)"></i></div>
+      <p class="hint">Every $100 of delivery pay earns 1 XP.${nxt?` Next unlock: ${esc(nxt[1])} at level ${nxt[0]}.`:""} Board: ${S.jobs.length} of ${maxJobs()} jobs, a new one every ${JOB_EVERY_MS/1000} seconds.</p></section>`; }
   if(open.length) h += `<section class="sec"><h3>Next goals</h3><ul class="goals">${open.map(x=>`<li>${esc(x[0])}</li>`).join("")}</ul></section>`;
-  h += `<section class="sec"><div class="sec-head"><h2>Ready to run</h2><span class="hint num">${can.length}</span></div>${can.length?`<div class="list">${can.map(x=>jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. New jobs post every 20 to 40 seconds.</p>`}</section>`;
+  h += `<section class="sec"><div class="sec-head"><h2>Ready to run</h2><span class="hint num">${can.length}</span></div>${can.length?`<div class="list">${can.map(x=>jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. A new job posts every 30 seconds.</p>`}</section>`;
   if(cant.length) h += `<section class="sec"><div class="sec-head"><h2>Other jobs nearby</h2><span class="hint num">${cant.length}</span></div><div class="list">${cant.map(x=>jobCard(x.j)).join("")}</div></section>`;
   return h;
 }
@@ -425,7 +459,7 @@ function renderFleet(){
   let h = `<section class="sec"><div class="sec-head"><h2>Your fleet</h2><span class="hint num">${S.vehicles.length} vehicles</span></div><div class="list">`;
   for(const b of S.bases){
     const vs = S.vehicles.filter(v=>v.base===b.id);
-    h += `<h3>${b.home?"HQ":"Garage"} · ${esc(cityName(b.city))} <span class="num" style="letter-spacing:0">${vs.length}/${b.slots}</span>${b.dispatcher?" · dispatcher on":""}</h3>`;
+    h += `<h3>${b.home?"HQ":"Garage"} · ${esc(cityName(b.city))} <span class="num" style="letter-spacing:0">${vs.length}/${hubCap(b)}</span>${b.dispatcher?" · dispatcher on":""}</h3>`;
     for(const v of vs){
       const tr = S.trips.find(x=>x.v===v.id), ty = TYPE[v.type];
       const cap = ty.cars?`${ty.cap} cars`:`${ty.cap.toLocaleString("en-US")} lb`;
@@ -450,8 +484,8 @@ function renderFleet(){
 function renderShop(){
   const L_ = level();
   let h = `<section class="sec"><div class="sec-head"><h2>Trucks</h2><span class="hint">60% back when sold</span></div><div class="list">`;
-  const baseOpts = S.bases.map(b=>{const n=S.vehicles.filter(v=>v.base===b.id).length;return `<option value="${b.id}" ${n>=b.slots?"disabled":""}>${esc(cityName(b.city))} (${n}/${b.slots})</option>`;}).join("");
-  const anySlot = S.bases.some(b=>S.vehicles.filter(v=>v.base===b.id).length<b.slots);
+  const baseOpts = S.bases.map(b=>{const n=S.vehicles.filter(v=>v.base===b.id).length;return `<option value="${b.id}" ${n>=hubCap(b)?"disabled":""}>${esc(cityName(b.city))} (${n}/${hubCap(b)})</option>`;}).join("");
+  const anySlot = S.bases.some(b=>S.vehicles.filter(v=>v.base===b.id).length<hubCap(b));
   for(const t of TYPES){
     const locked = t.lvl>L_, poor = S.cash<t.price;
     h += `<div class="card ${locked?"dim":""}"><div class="row"><b>${esc(t.n)}</b><span class="num">${money(t.price)}</span></div>
@@ -463,10 +497,12 @@ function renderShop(){
   const cityOpts = Object.keys(STATES).map(s=>`<optgroup label="${STATES[s]}">${CITIES.filter(c=>c.s===s&&!used.has(c.i)).map(c=>`<option value="${c.i}">${esc(c.n)}</option>`).join("")}</optgroup>`).join("");
   h += `<section class="sec"><h2>Garages</h2>
     <div class="card ${L_<GARAGE_LVL?"dim":""}"><div class="row"><b>Open a new garage</b><span class="num">${money(GARAGE_PRICE)}</span></div>
-      <p class="hint">Adds 4 vehicle slots and a ${RADIUS_MI}-mile job area around a new city.</p>
+      <p class="hint">Opens a small hub (10 vehicles) and a ${RADIUS_MI}-mile job area around a new city.</p>
       ${L_<GARAGE_LVL?`<span class="lock">Unlocks at level ${GARAGE_LVL}</span>`:`<div class="btnrow"><select id="newGarage" aria-label="City for new garage" style="flex:1;min-width:0;width:auto">${cityOpts}</select><button class="btn sm" data-act="garage" ${S.cash<GARAGE_PRICE?"disabled":""}>Open</button></div>`}</div>
-    ${S.bases.map(b=>`<div class="card"><div class="row"><b>${esc(cityName(b.city))}</b><span class="num">${b.slots} slots</span></div>
-      <div class="btnrow"><button class="btn ghost sm" data-act="slot" data-id="${b.id}" ${S.cash<SLOT_PRICE||b.slots>=12?"disabled":""}>${b.slots>=12?"Max size":`Add 2 slots · ${money(SLOT_PRICE)}`}</button></div></div>`).join("")}
+    ${S.bases.map(b=>{const t=b.tier||0, nx=HUB_TIERS[t+1], n=S.vehicles.filter(v=>v.base===b.id).length;
+      return `<div class="card"><div class="row"><b>${esc(cityName(b.city))}</b><span class="num">${n}/${hubCap(b)} vehicles</span></div>
+      <div class="meta"><span>${HUB_TIERS[t].n}</span></div>
+      <div class="btnrow">${!nx?`<span class="lock">Largest size</span>`:nx.lvl>L_?`<span class="lock">${nx.n} (${nx.cap} vehicles) unlocks at level ${nx.lvl}</span>`:`<button class="btn ghost sm" data-act="slot" data-id="${b.id}" ${S.cash<nx.price?"disabled":""}>Upgrade to ${nx.n} (${nx.cap} vehicles) · ${money(nx.price)}</button>`}</div></div>`;}).join("")}
   </section>
   <section class="sec"><h2>Coming next</h2>
     <div class="card dim"><div class="row"><b>Rail depots and trains</b><span class="lock">Level 15</span></div><p class="hint">Haul up to 60 railcars between depots. Your trucks bring freight in and take it out.</p></div>
@@ -551,12 +587,12 @@ $("#panelBody").addEventListener("click", e=>{
   if(a==="follow"){ following = id; const tr=S.trips.find(x=>x.id===id); if(tr) map.flyTo(posOf(tr,displayClock()).ll, Math.max(map.getZoom(),13), {duration:.6}); return; }
   if(a==="go"){
     const j = S.jobs.find(x=>x.id===id), v = S.vehicles.find(x=>x.id===chosenVeh);
-    if(j && v && dispatch(j,v)){ toast(`<b>${esc(v.n)}</b> dispatched to ${esc(j.from.biz)}, ${esc(cityName(j.from.c))}`); selectedJob=null; save(); drawJobs(); renderPanel(); }
+    if(j && v && dispatch(j,v)){ toast(`<b>${esc(v.n)}</b> dispatched to ${esc(j.from.name||j.from.biz)}, ${esc(cityName(j.from.c))}`); selectedJob=null; save(); drawJobs(); renderPanel(); }
     return;
   }
   if(a==="buy"){
     const t = TYPE[id], b = baseById($("#bs-"+id)?.value);
-    if(!b || S.cash<t.price || S.vehicles.filter(v=>v.base===b.id).length>=b.slots) return;
+    if(!b || S.cash<t.price || S.vehicles.filter(v=>v.base===b.id).length>=hubCap(b)) return;
     S.cash -= t.price;
     const n = S.vehicles.filter(v=>v.type===id).length + 1;
     S.vehicles.push({id:nid("v"), type:id, base:b.id, n:`${t.n.replace(/ \(.*\)/,"").replace("Semi + ","")} ${n}`.replace(/^\w/,c=>c.toUpperCase()), busy:false, jobs:0});
@@ -574,11 +610,11 @@ $("#panelBody").addEventListener("click", e=>{
   if(a==="garage"){
     const c = +$("#newGarage").value; if(S.cash<GARAGE_PRICE||isNaN(c)) return;
     S.cash -= GARAGE_PRICE;
-    const ct = CITIES[c], b = {id:nid("b"), city:c, pt:offsetPt(ct.lat,ct.lon,rnd(1,3),rnd(0,6.28)), slots:4, dispatcher:false, nextSpawn:S.clock, home:false};
-    S.bases.push(b); for(let k=0;k<6;k++) spawnJob(b);
+    const ct = CITIES[c], b = {id:nid("b"), city:c, pt:offsetPt(ct.lat,ct.lon,rnd(1,3),rnd(0,6.28)), tier:0, dispatcher:false, home:false};
+    S.bases.push(b);
     toast(`Garage opened in ${esc(cityName(c))}`); drawBases(); map.flyTo([b.pt.lat,b.pt.lon], 10, {duration:.6}); save(); refresh(); return;
   }
-  if(a==="slot"){ const b=baseById(id); if(b&&S.cash>=SLOT_PRICE&&b.slots<12){S.cash-=SLOT_PRICE;b.slots+=2;save();refresh();} return; }
+  if(a==="slot"){ const b=baseById(id), nx=b&&HUB_TIERS[(b.tier||0)+1]; if(nx&&S.cash>=nx.price&&level()>=nx.lvl){S.cash-=nx.price;b.tier=(b.tier||0)+1;toast(`${esc(cityName(b.city))} is now a ${nx.n.toLowerCase()}`);save();refresh();} return; }
   if(a==="disp"){ const b=baseById(id); if(!b) return; if(b.dispatcher) b.dispatcher=false; else if(S.cash>=DISPATCH_PRICE){S.cash-=DISPATCH_PRICE;b.dispatcher=true;} save(); refresh(); return; }
   if(a==="askSell"){ pendingConfirm="sell"+id; renderPanel(); return; }
   if(a==="sell"){ const v=S.vehicles.find(x=>x.id===id); if(v&&!v.busy){S.cash+=TYPE[v.type].price*0.6; S.vehicles=S.vehicles.filter(x=>x!==v);} pendingConfirm=null; save(); refresh(); return; }
@@ -647,6 +683,8 @@ function start(){
   try{ const raw = localStorage.getItem(KEY); if(raw) loaded = JSON.parse(raw); }catch(_){}
   if(loaded && loaded.v===2){
     S = loaded;
+    S.bases.forEach(b=>{ if(b.tier==null) b.tier=0; delete b.slots; });
+    S.jobs.forEach(j=>{ if(j.urg==="standard") j.expires=null; if(!j.from.name){ j.from.name=bizName(j.from.biz); j.from.num=houseNo(); j.to.name=bizName(j.to.biz); j.to.num=houseNo(); } });
     const dt = Date.now() - S.lastReal; let log = null;
     S.lastReal = Date.now();
     if(dt > 60e3) log = simulateAway(dt); else S.trips.forEach(roadTrip);

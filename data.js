@@ -82,3 +82,52 @@ const GARAGE_PRICE = 40000, GARAGE_LVL = 3, SLOT_PRICE = 15000, DISPATCH_PRICE =
 const RADIUS_MI = 150, MAX_DEADHEAD = 450, BOARD_PER_BASE = 10, MIN = 60000;
 const UNLOCKS = {2:"Box truck",3:"Second garage",5:"Reefer box truck",6:"CDL drivers and straight truck",8:"Dispatchers",10:"Semi + dry van",12:"Semi + reefer",14:"Semi + flatbed",15:"Rail depots (next build)",18:"Tankers and hazmat training",20:"Car haulers, air cargo (next build)",25:"Team-driven semi"};
 
+
+/* Hub sizes: every garage starts Small and can be upgraded. */
+const HUB_TIERS = [
+  {n:"Small hub",  cap:10, price:0,      lvl:1},
+  {n:"Medium hub", cap:20, price:75000,  lvl:4},
+  {n:"Large hub",  cap:30, price:200000, lvl:10}
+];
+const JOB_EVERY_MS = 30000;   // a new job posts every 30 seconds while the board has room
+
+/* Made-up business names: a place word + a suffix that fits the business type. */
+const NAME_WORDS = ["Magnolia","Cedar Ridge","Blue Heron","Ironwood","Riverbend","Red Clay","Pine Hollow","Silver Creek","Oak Bluff","Stonegate","Harborview","Copper Hill","Willow Bend","Granite Peak","Sunfield","Eagle Rock","Bramblewood","Prairie Wind","Lakeshore","Foxglove","Summit Point","Briarwood","Northstar","Hickory Lane","Juniper","Bayou","Cottonwood","Tall Pine","Golden Field","Sweetwater","Thunder Ridge","Peach Blossom","Lone Oak","Crescent","Bluestone","Sandhill","Wildflower","Ridgeline","Old Mill","Harvest Moon"];
+const NAME_SUFFIX = {
+  "Warehouse":["Storage & Logistics","Warehousing","Distribution Co."],
+  "Factory":["Manufacturing","Industries","Works"],
+  "Distribution Center":["Distribution Center","Supply Hub"],
+  "Parcel Hub":["Parcel Center","Courier Hub","Express Sort"],
+  "Furniture Maker":["Furniture Co.","Woodcraft","Home Furnishings"],
+  "Bottling Plant":["Bottling Co.","Beverage Works"],
+  "Paper Mill":["Paper Mill","Paper & Pulp"],
+  "Farm":["Farms","Family Farm","Orchards","Produce Co."],
+  "Food Processor":["Foods","Fresh Foods","Packing Co."],
+  "Dairy":["Dairy","Creamery"],
+  "Lumber Yard":["Lumber Co.","Timber Supply"],
+  "Sawmill":["Sawmill","Timber Mill"],
+  "Steel Mill":["Steel","Steel Works","Metals"],
+  "Machine Shop":["Machine & Tool","Machine Works"],
+  "Equipment Factory":["Equipment","Heavy Equipment Co."],
+  "Chemical Plant":["Chemical","Chemical Works"],
+  "Water Bottler":["Spring Water Co.","Water Co."],
+  "Refinery":["Refining","Energy"],
+  "Auto Plant":["Motor Assembly","Auto Works"],
+  "Vehicle Port":["Vehicle Port","Auto Terminal"],
+  "Retail Store":["Outfitters","General Store","Market"],
+  "Grocery Distribution Center":["Grocery Distribution","Fresh Market DC"],
+  "Hardware Store":["Hardware","Home & Hardware","Building Supply"],
+  "Hospital":["Regional Medical Center","General Hospital","Medical Center"],
+  "Office Park":["Office Park","Business Center"],
+  "Furniture Store":["Furniture Gallery","Home Store"],
+  "Hotel":["Inn & Suites","Grand Hotel","Lodge"],
+  "Big-Box Store":["Supercenter","Mega Mart"],
+  "Restaurant Supplier":["Restaurant Supply","Food Service"],
+  "Construction Site":["Tower (construction)","Apartments (construction)","Commons (construction)"],
+  "Manufacturing Plant":["Manufacturing","Fabrication"],
+  "Water Treatment Plant":["Water Treatment Plant","Water Works"],
+  "Fuel Depot":["Fuel Depot","Fuel Terminal"],
+  "Airport Fuel Farm":["Airfield Fuel Farm"],
+  "Car Dealership":["Motors","Auto Sales","Auto Mall"]
+};
+const FALLBACK_STREETS = ["Industrial Blvd","Commerce Pkwy","Logistics Dr","Depot St","Enterprise Way","Freight Ln"];
