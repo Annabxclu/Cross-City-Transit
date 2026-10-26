@@ -54,7 +54,8 @@ const CARGO = {
   general:{n:"General freight",mult:1.0}, parcels:{n:"Parcels",mult:1.1}, furniture:{n:"Furniture",mult:1.1},
   pallets:{n:"Pallets",mult:1.0}, refrigerated:{n:"Refrigerated",mult:1.4}, lumber:{n:"Lumber",mult:1.2},
   steel:{n:"Steel",mult:1.2}, machinery:{n:"Machinery",mult:1.3}, liquids:{n:"Liquids",mult:1.2},
-  hazmat:{n:"Hazmat fuel",mult:1.8}, vehicles:{n:"Vehicles",mult:1.5}
+  hazmat:{n:"Hazmat fuel",mult:1.8}, vehicles:{n:"Vehicles",mult:1.5},
+  grain:{n:"Grain",mult:0.8}, coal:{n:"Coal",mult:0.7}, gravel:{n:"Gravel",mult:0.7}, containers:{n:"Containers",mult:1.0}
 };
 const PRODUCERS = {general:["Warehouse","Factory","Distribution Center"],parcels:["Parcel Hub","Warehouse"],furniture:["Furniture Maker"],pallets:["Bottling Plant","Paper Mill","Factory"],refrigerated:["Farm","Food Processor","Dairy"],lumber:["Lumber Yard","Sawmill"],steel:["Steel Mill"],machinery:["Machine Shop","Equipment Factory"],liquids:["Chemical Plant","Water Bottler"],hazmat:["Refinery"],vehicles:["Auto Plant","Vehicle Port"]};
 const ACCEPTORS = {general:["Retail Store","Grocery Distribution Center","Hardware Store"],parcels:["Retail Store","Hospital","Office Park"],furniture:["Furniture Store","Hotel"],pallets:["Grocery Distribution Center","Big-Box Store","Warehouse"],refrigerated:["Grocery Distribution Center","Restaurant Supplier","Hospital"],lumber:["Construction Site","Hardware Store"],steel:["Construction Site","Manufacturing Plant"],machinery:["Construction Site","Manufacturing Plant","Farm"],liquids:["Manufacturing Plant","Water Treatment Plant"],hazmat:["Fuel Depot","Airport Fuel Farm"],vehicles:["Car Dealership"]};
@@ -80,7 +81,7 @@ const LAST = ["Brooks","Ortiz","Hale","Washington","Price","Nguyen","Carter","Re
 const DRV_LEVELS = [0,5,15,30,50];
 const GARAGE_PRICE = 40000, GARAGE_LVL = 1, SLOT_PRICE = 15000, DISPATCH_PRICE = 15000, DISPATCH_LVL = 8, HAZMAT_PRICE = 10000;
 const RADIUS_MI = 150, MAX_DEADHEAD = 300, BOARD_PER_BASE = 10, MIN = 60000;
-const UNLOCKS = {2:"Box truck",5:"Reefer box truck",6:"CDL drivers and straight truck",8:"Dispatchers",10:"Semi + dry van",12:"Semi + reefer",14:"Semi + flatbed",15:"Rail depots (next build)",18:"Tankers and hazmat training",20:"Car haulers, air cargo (next build)",25:"Team-driven semi"};
+const UNLOCKS = {2:"Box truck",5:"Reefer box truck",6:"CDL drivers and straight truck",8:"Dispatchers",10:"Semi + dry van",12:"Semi + reefer",14:"Semi + flatbed",15:"Trains, rail yards and engineers",18:"Tankers and hazmat training",20:"Road freight locomotive, car haulers, air cargo (next build)",25:"Team-driven semi"};
 
 
 /* Hub sizes: every garage starts Small and can be upgraded. */
@@ -151,3 +152,72 @@ const LOAD_BASE_MIN = 0.5;           // dock check-in and paperwork
 const LOAD_MIN_PER_1000LB = 0.1;     // 3,000 lb ≈ 48 s, 10,000 lb ≈ 1.5 min, 45,000 lb ≈ 5 min
 const LOAD_MIN_PER_CAR = 0.5;        // car haulers, per vehicle
 TYPES.forEach(t => { t.slow = 1; });
+
+
+/* ---------------- Rail ----------------
+   Real US freight rail yards (positions from OpenStreetMap). Trains run between them on real track. */
+const RAIL_YARDS = [
+  ["bailey","Bailey Yard","North Platte","NE",41.1495,-100.8314],
+  ["clearing","Clearing Yard","Bedford Park","IL",41.7680,-87.7600],
+  ["proviso","Proviso Yard","Northlake","IL",41.8987,-87.9046],
+  ["corwith","Corwith Yard","Chicago","IL",41.8170,-87.7117],
+  ["argentine","Argentine Yard","Kansas City","KS",39.0809,-94.6770],
+  ["northtown","Northtown Yard","Fridley","MN",45.0430,-93.2730],
+  ["roseville","Roseville Yard","Roseville","CA",38.7285,-121.3088],
+  ["barstow","Barstow Yard","Barstow","CA",34.8935,-117.0712],
+  ["hobart","Hobart Yard","Los Angeles","CA",34.0070,-118.1864],
+  ["roper","Roper Yard","Salt Lake City","UT",40.7149,-111.9102],
+  ["belen","Belen Yard","Belen","NM",34.6499,-106.7686],
+  ["hinkle","Hinkle Yard","Hermiston","OR",45.7936,-119.2586],
+  ["pasco","Pasco Yard","Pasco","WA",46.2648,-119.0989],
+  ["balmer","Balmer Yard","Seattle","WA",47.6442,-122.3811],
+  ["brooklyn","Brooklyn Yard","Portland","OR",45.4901,-122.6450],
+  ["yardley","Yardley Yard","Spokane","WA",47.6702,-117.3381],
+  ["rennick","Rennick Yard","Denver","CO",39.7769,-104.9973],
+  ["englewood","Englewood Yard","Houston","TX",29.7949,-95.2947],
+  ["alliance","Alliance Intermodal Yard","Fort Worth","TX",33.0046,-97.3490],
+  ["avondale","Avondale Yard","New Orleans","LA",29.9181,-90.1830],
+  ["radnor","Radnor Yard","Nashville","TN",36.0915,-86.7560],
+  ["inman","Inman Yard","Atlanta","GA",33.7968,-84.4456],
+  ["norris","Norris Yard","Birmingham","AL",33.5574,-86.6858],
+  ["rice","Rice Yard","Waycross","GA",31.1824,-82.3911],
+  ["moncrief","Moncrief Yard","Jacksonville","FL",30.3483,-81.7037],
+  ["winston","Winston Yard","Lakeland","FL",28.0106,-81.9960],
+  ["acca","Acca Yard","Richmond","VA",37.5849,-77.4776],
+  ["enola","Enola Yard","Harrisburg","PA",40.2942,-76.9272],
+  ["conway","Conway Yard","Pittsburgh","PA",40.6643,-80.2450],
+  ["selkirk","Selkirk Yard","Albany","NY",42.5536,-73.8375],
+  ["oakisland","Oak Island Yard","Newark","NJ",40.7058,-74.1342],
+  ["buckeye","Buckeye Yard","Columbus","OH",39.9893,-83.1304],
+  ["queensgate","Queensgate Yard","Cincinnati","OH",39.1260,-84.5397],
+  ["avon","Avon Yard","Indianapolis","IN",39.7573,-86.3647],
+  ["madison","Madison Yard","Madison","IL",38.6794,-90.1438],
+  ["frontier","Frontier Yard","Buffalo","NY",42.9013,-78.8004],
+  ["cherokee","Cherokee Yard","Tulsa","OK",36.1216,-96.0114],
+  ["livernois","Livernois Yard","Detroit","MI",42.3199,-83.1200]
+].map(([id,n,city,s,lat,lon])=>({id,n,city,s,lat,lon}));
+const YARD = Object.fromEntries(RAIL_YARDS.map(y=>[y.id,y]));
+const RAIL_LVL = 15;
+const RAIL_PAY = 0.5;            // rail pays less per pound-mile, but trains carry a lot
+const CHAIN_BONUS = 0.25;        // extra on top of all three legs when an intermodal chain is finished
+const CONTAINER_LB = 40000;
+const MAX_RAIL_DEADHEAD = 600;   // a train can run empty this far to reach a pickup yard
+const ENGINEER = {n:"Engineer", fee:20000, lvl:RAIL_LVL};
+const RAILCARS = {
+  box:    {n:"Boxcar",            price:60000, cap:120000, cargo:["general","pallets"]},
+  hopper: {n:"Covered hopper",    price:65000, cap:200000, cargo:["grain"]},
+  open:   {n:"Open hopper",       price:55000, cap:200000, cargo:["coal","gravel"]},
+  tank:   {n:"Tank car",          price:90000, cap:180000, cargo:["liquids"]},
+  reefer: {n:"Reefer car",        price:95000, cap:100000, cargo:["refrigerated"]},
+  flat:   {n:"Flatcar",           price:50000, cap:150000, cargo:["lumber","steel","machinery"]},
+  well:   {n:"Container well car",price:70000, cap:2, perUnit:CONTAINER_LB, cargo:["containers"], unit:"container"}
+};
+const LOCOS = [
+  {id:"switcher",  n:"Switcher locomotive",      price:400000,  maxCars:8,  leg:400,  lvl:15, mode:"train", lic:"eng"},
+  {id:"roadloco",  n:"Road freight locomotive",  price:1200000, maxCars:25, leg:1500, lvl:20, mode:"train", lic:"eng"},
+  {id:"heavyloco", n:"Heavy-haul locomotive",    price:2800000, maxCars:60, leg:3000, lvl:30, mode:"train", lic:"eng"}
+];
+LOCOS.forEach(l=>{ TYPE[l.id] = l; });
+DRIVER_KIND.eng = {n:"Engineer", cut:0, fee:ENGINEER.fee, lvl:RAIL_LVL};
+Object.assign(PRODUCERS, {grain:["Grain Elevator"], coal:["Coal Mine"], gravel:["Quarry"]});
+Object.assign(ACCEPTORS, {grain:["Flour Mill"], coal:["Power Plant"], gravel:["Concrete Plant"]});

@@ -237,3 +237,15 @@ label.fld{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(
 .loads li .lst{color:var(--blue);font-size:12px}
 .loads li.done{opacity:.55}
 .loads li.done .lst{color:var(--good)}
+
+/* Rail */
+.mk-yard{width:22px;height:22px;border-radius:4px;background:#3a4a63;color:#fff;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45);display:grid;place-items:center}
+.mk-yard.own{background:#1e5a3c}
+.mk-pin.rail .body{fill:#3a4a63}
+.mk-pin.chain .body{fill:#0f7c86}
+.mk-pin.rail.cant .body,.mk-pin.chain.cant .body{fill:#8a948f}
+.chip.railchip i{background:#3a4a63}
+.chip.chainchip{background:color-mix(in srgb, #0f7c86 14%, var(--surface))}
+.chip.chainchip i{background:#0f7c86}
+.railtoggle,.testtoggle{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink);white-space:nowrap}
+.railtoggle{padding-right:6px;border-left:1px solid var(--line);padding-left:8px}
