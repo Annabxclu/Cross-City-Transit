@@ -53,7 +53,7 @@ button{cursor:pointer}
 
 /* App grid */
 .app{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 410px}
-.mapwrap{position:relative;min-width:0;background:var(--mapbg);overflow:hidden;border-right:1px solid var(--line)}
+.mapwrap{position:relative;isolation:isolate;z-index:0;min-width:0;background:var(--mapbg);overflow:hidden;border-right:1px solid var(--line)}
 #map{width:100%;height:100%}
 .panel{display:flex;flex-direction:column;min-height:0;background:var(--surface)}
 .tabs{display:flex;border-bottom:1px solid var(--line);padding-left:max(8px,env(safe-area-inset-left,0px));padding-right:max(8px,env(safe-area-inset-right,0px));overflow-x:auto}
@@ -140,7 +140,7 @@ label.fld{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(
 .maperr{position:absolute;inset:auto 12px 12px auto;font-size:12px;color:var(--muted)}
 
 /* Overlays */
-.overlay{position:fixed;inset:0;z-index:20;background:rgba(10,16,14,.55);display:grid;place-items:center;
+.overlay{position:fixed;inset:0;z-index:2000;background:rgba(10,16,14,.55);display:grid;place-items:center;
   padding-block:20px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));overflow:auto}
 .dialog{background:var(--surface);border-radius:8px;width:min(460px,100%);overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.3)}
 .dialog .sign-strip{background:var(--sign);color:var(--sign-ink);padding:16px 20px;border-bottom:3px solid var(--sign-line)}

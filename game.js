@@ -257,6 +257,9 @@ function simulateAway(ms){
 /* ---------------- Street map ---------------- */
 const map = L.map("map", {zoomControl:true, worldCopyJump:false, minZoom:4, maxZoom:18, preferCanvas:false}).setView([38.5,-96], 4);
 L.tileLayer(TILE_URL, {maxZoom:19, attribution:TILE_ATTR}).addTo(map);
+// Keep the map filling its box when the layout or window size changes.
+try{ new ResizeObserver(()=>map.invalidateSize()).observe(document.getElementById("map")); }catch(_){}
+window.addEventListener("load", ()=>map.invalidateSize());
 const layerRings = L.layerGroup().addTo(map), layerRoutes = L.layerGroup().addTo(map), layerSel = L.layerGroup().addTo(map),
       layerBases = L.layerGroup().addTo(map), layerJobs = L.layerGroup().addTo(map), layerVeh = L.layerGroup().addTo(map);
 const jobMarkers = new Map(), vehMarkers = new Map(), tripLines = new Map();
