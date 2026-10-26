@@ -249,13 +249,13 @@ function mkSeg(ph, path, t0, t1){ return {ph, path, t0, t1}; }
 function dispatch(j, v, viaDispatcher){
   const r = vehicleFor(v,j); if(!r.ok) return false;
   const rt = returnTrip(v), A = startPt(v);
-  if(rt){ S.trips = S.trips.filter(x=>x!==rt); v.ret = null; }
+  if(rt){ const ret=rt.segs[4]; v.miles=(v.miles||0)+(rt.retMi||0)*Math.min(1,Math.max(0,(S.clock-ret.t0)/((ret.t1-ret.t0)||1))); S.trips = S.trips.filter(x=>x!==rt); v.ret = null; }
   const p = r.plan, base = baseById(v.base), B = basePt(base), O = {lat:j.from.lat,lon:j.from.lon}, D = {lat:j.to.lat,lon:j.to.lon};
   const t0 = S.clock, a = t0+p.tDead, b = a+p.ld, c = b+p.tHaul, d = c+p.lu, e = d+p.tBack;
   const trip = {id:nid("t"), v:v.id, drivers:r.drivers.map(x=>x.id), job:{...j, path:undefined},
     segs:[ mkSeg("dead",straight(A,O),t0,a), mkSeg("load",[[O.lat,O.lon]],a,b), mkSeg("haul", j.path||straight(O,D), b,c),
            mkSeg("load",[[D.lat,D.lon]],c,d), mkSeg("ret",straight(D,B),d,e) ],
-    deliverAt:d, endAt:e, gross:Math.round(j.pay*p.bonus), cut:p.cut+(viaDispatcher?0.05:0), delivered:false, auto:!!viaDispatcher};
+    deadMi:p.dead, haulMi:j.miles, retMi:p.back, deliverAt:d, endAt:e, gross:Math.round(j.pay*p.bonus), cut:p.cut+(viaDispatcher?0.05:0), delivered:false, auto:!!viaDispatcher};
   S.trips.push(trip);
   v.busy = true; r.drivers.forEach(x=>x.busy=true);
   S.jobs = S.jobs.filter(x=>x.id!==j.id);
@@ -280,7 +280,7 @@ function deliver(tr){
   const net = tr.gross*(1-tr.cut)*S.payMult;
   const before = level();
   S.cash += net; S.earned += net; S.xp += tr.gross/100; S.jobsDone++;
-  const v = S.vehicles.find(x=>x.id===tr.v); if(v) v.jobs++;
+  const v = S.vehicles.find(x=>x.id===tr.v); if(v){ v.jobs++; v.miles=(v.miles||0)+(tr.deadMi||0)+(tr.haulMi||tr.job.miles||0); }
   tr.drivers.forEach(id=>{const d=S.drivers.find(x=>x.id===id); if(d){d.jobs++; d.earned+=tr.gross*DRIVER_KIND[d.kind].cut;}});
   if(awayLog){awayLog.jobs++; awayLog.net+=net; logEvent(`<b>${esc(v?v.n:"Truck")}</b> delivered ${esc(CARGO[tr.job.cargo].n.toLowerCase())} to ${esc(tr.job.to.name||cityName(tr.job.to.c))} <span class="num">+${money(net)}</span> (while you were away)`, simWhen());}
   else toast(`<b>${esc(v?v.n:"Truck")}</b> delivered ${esc(CARGO[tr.job.cargo].n.toLowerCase())} to ${esc(tr.job.to.name||tr.job.to.biz)}, ${esc(cityName(tr.job.to.c))} <span class="num">+${money(net)}</span>`);
@@ -299,7 +299,7 @@ function logic(){
   }
   const done = S.trips.filter(tr=>S.clock>=tr.endAt);
   if(done.length){
-    done.forEach(tr=>{const v=S.vehicles.find(x=>x.id===tr.v); if(v){ v.busy=false; if(v.ret===tr.id) v.ret=null; } tr.drivers.forEach(id=>{const d=S.drivers.find(x=>x.id===id); if(d)d.busy=false;});});
+    done.forEach(tr=>{const v=S.vehicles.find(x=>x.id===tr.v); if(v){ v.busy=false; if(v.ret===tr.id||!v.ret) v.miles=(v.miles||0)+(tr.retMi||0); if(v.ret===tr.id) v.ret=null; } tr.drivers.forEach(id=>{const d=S.drivers.find(x=>x.id===id); if(d)d.busy=false;});});
     S.trips = S.trips.filter(tr=>S.clock<tr.endAt); changed = true;
   }
   const n0 = S.jobs.length;
@@ -477,6 +477,12 @@ function jobCard(j){
     ${st.can?`<span class="ok">${esc(st.opts[0].v.n)} · back in ${dur(st.opts[0].r.plan.total)}</span>`:`<span class="need">${esc(st.why)}</span>`}
   </button>`;
 }
+function payBreakdown(j){
+  const w = j.cargo==="vehicles" ? j.weight*4000 : j.weight;
+  const dist = 1.5*j.miles*Math.pow(w/1000,0.8);
+  const um = j.urg==="express"?1.8:j.urg==="priority"?1.3:1;
+  return `<p class="hint" style="margin:0">Pay: ${money(150*PAY_SCALE)} base + ${money(dist*PAY_SCALE)} for ${j.miles} mi × ${weightStr(j)} × ${CARGO[j.cargo].mult} ${esc(CARGO[j.cargo].n.toLowerCase())}${um>1?` × ${um} ${j.urg}`:""}</p>`;
+}
 function dispatchCard(j){
   const st = jobStatus(j), local = j.from.c===j.to.c;
   let opts;
@@ -495,6 +501,7 @@ function dispatchCard(j){
     <div class="leg"><span class="dot"></span><span><b>${esc(j.from.name||j.from.biz)}</b> · ${esc(j.from.biz)}<br><span class="hint">${esc(addrLine(j.from))}</span></span>
       <span class="line"></span><span class="hint"><span class="num">${weightStr(j)}</span> · <span class="num">${j.miles} mi</span> ${j.routing?"· checking roads":j.path?"by road":"(estimate)"}</span>
       <span class="dot end"></span><span><b>${esc(j.to.name||j.to.biz)}</b> · ${esc(j.to.biz)}<br><span class="hint">${esc(addrLine(j.to))}</span></span></div>
+    ${payBreakdown(j)}
     <div class="btnrow"><button class="btn ghost sm" data-act="fly" data-id="${j.id}">Show route on map</button></div>
     ${opts}
   </section>`;
@@ -533,14 +540,14 @@ function renderFleet(){
         const pct = Math.min(100,(t-tr.segs[0].t0)/(tr.endAt-tr.segs[0].t0)*100);
         const ds = tr.drivers.map(id=>S.drivers.find(d=>d.id===id)?.name).join(" + ");
         h += `<div class="card"><div class="row"><b><span class="vic">${iconSvg(TYPE[v.type].mode,13)}</span>${esc(v.n)}</b><span class="status busy" data-ph="${tr.id}">${phaseText(tr,t)}</span></div>
-          <div class="route">${esc(cityName(tr.job.from.c))} <span class="arrow">→</span> ${esc(cityName(tr.job.to.c))} · ${esc(ds)}</div>
+          <div class="route">${esc(cityName(tr.job.from.c))} <span class="arrow">→</span> ${esc(cityName(tr.job.to.c))} · ${esc(ds)} · <span class="num">${Math.round(v.miles||0).toLocaleString("en-US")} mi lifetime</span></div>
           <div class="prog"><i data-prog="${tr.id}" style="width:${pct}%"></i></div>
           <div class="meta"><span>${tr.delivered?"Delivered, home in":"Delivers in"} <span class="num" data-eta="${tr.id}">${dur((tr.delivered?tr.endAt:tr.deliverAt)-t)}</span></span><span class="num">${money(tr.gross*(1-tr.cut))}</span></div>
           <div class="btnrow"><button class="btn ghost sm" data-act="follow" data-id="${tr.id}">Follow on map</button><button class="btn ghost sm" data-act="askRen" data-id="${v.id}">Rename</button></div>${pendingConfirm===("ren"+v.id)?`<div class="btnrow"><input type="text" id="ren-${v.id}" maxlength="24" value="${esc(v.n)}" aria-label="New name for ${esc(v.n)}" style="flex:1;min-width:0;width:auto"><button class="btn sm" data-act="ren" data-id="${v.id}">Save</button><button class="btn ghost sm" data-act="cancel">Cancel</button></div>`:""}</div>`;
       } else {
         const confirm = pendingConfirm===("sell"+v.id);
         h += `<div class="card"><div class="row"><b><span class="vic">${iconSvg(TYPE[v.type].mode,13)}</span>${esc(v.n)}</b><span class="status idle">Idle</span></div>
-          <div class="meta"><span>${esc(ty.n)}</span><span class="num">${cap}</span><span class="num">${ty.leg} mi range</span><span>${v.jobs} jobs</span></div>
+          <div class="meta"><span>${esc(ty.n)}</span><span class="num">${cap}</span><span class="num">${ty.leg} mi range</span><span>${v.jobs} jobs</span><span class="num">${Math.round(v.miles||0).toLocaleString("en-US")} mi lifetime</span></div>
           <div class="btnrow"><button class="btn ghost sm" data-act="askRen" data-id="${v.id}">Rename</button>${S.vehicles.length>1&&!confirm?`<button class="btn ghost sm" data-act="askSell" data-id="${v.id}">Sell</button>`:""}</div>${pendingConfirm===("ren"+v.id)?`<div class="btnrow"><input type="text" id="ren-${v.id}" maxlength="24" value="${esc(v.n)}" aria-label="New name for ${esc(v.n)}" style="flex:1;min-width:0;width:auto"><button class="btn sm" data-act="ren" data-id="${v.id}">Save</button><button class="btn ghost sm" data-act="cancel">Cancel</button></div>`:""}
           ${S.vehicles.length>1&&confirm?`<div class="btnrow">${confirm?`<button class="btn warn sm" data-act="sell" data-id="${v.id}">Sell for ${money(ty.price*0.6)}</button><button class="btn ghost sm" data-act="cancel">Keep it</button>`:`<button class="btn ghost sm" data-act="askSell" data-id="${v.id}">Sell</button>`}</div>`:""}</div>`;
       }
@@ -827,7 +834,7 @@ function start(){
   if(loaded && loaded.v===2){
     S = loaded;
     S.bases.forEach((b,i)=>{ if(b.tier==null) b.tier=0; delete b.slots; if(!b.name) b.name = b.home ? "HQ" : `Hub ${i+1}`; });
-    S.jobs.forEach(j=>{ if(j.urg==="standard") j.expires=null; if(!j.from.name){ j.from.name=bizName(j.from.biz); j.from.num=houseNo(); j.to.name=bizName(j.to.biz); j.to.num=houseNo(); } });
+    S.jobs.forEach(j=>{ j.pay = payFor(j.miles, j.weight, j.cargo, j.urg); if(j.urg==="standard") j.expires=null; if(!j.from.name){ j.from.name=bizName(j.from.biz); j.from.num=houseNo(); j.to.name=bizName(j.to.biz); j.to.num=houseNo(); } });
     const dt = Date.now() - S.lastReal; let log = null;
     S.lastReal = Date.now();
     if(dt > 60e3) log = simulateAway(dt); else S.trips.forEach(roadTrip);
