@@ -916,7 +916,7 @@ function evChip(j){ return `<span class="chip evchip" style="--ev:${j.evColor||"
 function chainChip(j){ return `<span class="chip chainchip"><i></i>Intermodal · leg ${j.chain.leg} of 3${j.chain.leg===2?" · train":" · truck"}</span>`; }
 function cargoChip(c){ return `<span class="chip" style="color:var(--c-${c})"><i></i><span style="color:var(--ink)">${esc(CARGO[c].n)}</span></span>`; }
 function urgTag(u){ return u==="standard"?"":`<span class="urg ${u}">${u}</span>`; }
-const MENU_PAGES = {fleet:"Fleet", shop:"Shop", crew:"Crew", tasks:"Tasks", log:"Log", company:"Company"};
+const MENU_PAGES = {shop:"Shop", crew:"Crew", tasks:"Tasks", log:"Log", company:"Company"};
 function markTabs(){
   document.querySelectorAll(".tab[data-tab]").forEach(b=>b.setAttribute("aria-selected", b.dataset.tab===tab));
   const inMenu = tab in MENU_PAGES;
@@ -989,7 +989,7 @@ function renderJobs(mode="truck"){
   if(sj) h += dispatchCard(sj);
   if(rail){
     const trains = S.vehicles.filter(isTrain);
-    if(!trains.length) h += `<p class="hint" style="color:var(--ink)">You have no trains yet. Buy a locomotive in <b>Menu → Shop</b>, add railcars in <b>Menu → Fleet</b>, and hire an engineer in <b>Menu → Crew</b>.</p>`;
+    if(!trains.length) h += `<p class="hint" style="color:var(--ink)">You have no trains yet. Buy a locomotive in <b>Menu → Shop</b>, add railcars in the <b>Fleet</b> tab, and hire an engineer in <b>Menu → Crew</b>.</p>`;
     h += `<p class="hint">Rail jobs run between real freight yards (square markers on the map). Intermodal legs 1 and 3 are truck jobs on the Truck jobs tab.</p>`;
   }
   if(!rail && S.jobsDone<1 && !sj) h += `<p class="hint" style="color:var(--ink)">Tap an orange pin on the map, or pick a job below, then send your van. Gray pins need a vehicle you do not own yet.</p>`;
@@ -1075,7 +1075,7 @@ function yardOptions(){
 function renderTrainShop(L_){
   if(L_ < RAIL_LVL) return `<div class="card dim"><div class="row"><b>Trains</b><span class="lock">Level ${RAIL_LVL}</span></div><p class="hint">Run trains between real freight yards and hand containers to your trucks at each end.</p></div>`;
   const yo = yardOptions();
-  return `<p class="hint">Trains run between real freight yards on real track. Each train needs a locomotive, railcars for the cargo, and an engineer (Menu → Crew). Add railcars from the train's card in Menu → Fleet.</p>
+  return `<p class="hint">Trains run between real freight yards on real track. Each train needs a locomotive, railcars for the cargo, and an engineer (Menu → Crew). Add railcars from the train's card in the Fleet tab.</p>
     ${LOCOS.map(l=>{ const locked = l.lvl>L_, poor = S.cash<l.price;
       return `<div class="card ${locked?"dim":""}"><div class="row"><b><span class="vic">${iconSvg("train",13)}</span>${esc(l.n)}</b><span class="num">${money(l.price)}</span></div>
         <div class="meta"><span class="num">Up to ${l.maxCars} railcars</span><span class="num">${l.leg.toLocaleString("en-US")} mi range</span><span>Engineer</span></div>
@@ -1246,7 +1246,7 @@ $("#panelBody").addEventListener("click", e=>{
     const l = TYPE[id], y = $("#ly-"+id)?.value; if(!l || !YARD[y] || S.cash < l.price || level() < l.lvl) return;
     S.cash -= l.price; const n = S.vehicles.filter(isTrain).length + 1;
     S.vehicles.push({id:nid("v"), type:l.id, yard:y, cars:{}, n:`Train ${n}`, busy:false, jobs:0, miles:0});
-    toast(`Bought a ${esc(l.n.toLowerCase())} at ${esc(YARD[y].n)}. Add railcars in Menu → Fleet${S.drivers.some(d=>d.kind==="eng")?"":" and hire an engineer"}.`, 6000);
+    toast(`Bought a ${esc(l.n.toLowerCase())} at ${esc(YARD[y].n)}. Add railcars in the Fleet tab${S.drivers.some(d=>d.kind==="eng")?"":" and hire an engineer"}.`, 6000);
     drawYards(); save(); refresh(); return;
   }
   if(a==="addCar"){
