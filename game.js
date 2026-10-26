@@ -910,7 +910,7 @@ function frame(){
       const mode = v ? (TYPE[v.type]?.mode||"truck") : "truck";
       if(!m){
         m = L.marker(p.ll, {icon:L.divIcon({className:"", html:`<div class="mk-veh ${vc}">${iconSvg(mode,15)}</div>`, iconSize:[26,26], iconAnchor:[13,13]}), zIndexOffset:800, title:v?`${v.n} · ${TYPE[v.type]?.n||""}`:"Truck"});
-        m.on("click", e=>{ L.DomEvent.stopPropagation(e); setTab("fleet"); });
+        m.on("click", e=>{ L.DomEvent.stopPropagation(e); focusVehicle(tr.v); });
         m.addTo(layerVeh); vehMarkers.set(tr.id, m); m._ph = vc;
       } else {
         m.setLatLng(p.ll);
@@ -1104,7 +1104,7 @@ function renderFleet(){
         const pct = Math.min(100,(t-tr.startAt)/((tr.endAt-tr.startAt)||1)*100);
         const ds = tr.drivers.map(id=>S.drivers.find(d=>d.id===id)?.name).join(" + ");
         const ns = nextStopAt(tr,t), used = usedRoom(tr);
-        h += `<div class="card"><div class="row"><b><span class="vic">${iconSvg(TYPE[v.type].mode,13)}</span>${esc(v.n)}</b><span class="status busy" data-ph="${tr.id}">${esc(phaseText(tr,t))}</span></div>
+        h += `<div class="card" id="vc-${v.id}"><div class="row"><b><span class="vic">${iconSvg(TYPE[v.type].mode,13)}</span>${esc(v.n)}</b><span class="status busy" data-ph="${tr.id}">${esc(phaseText(tr,t))}</span></div>
           <div class="meta"><span>${esc(ds)}</span><span class="num">${roomStr(ty, used)} loaded or booked</span><span class="num">${Math.round(v.miles||0).toLocaleString("en-US")} mi lifetime</span></div>
           <div class="prog"><i data-prog="${tr.id}" style="width:${pct}%"></i></div>
           <ul class="loads">${tr.loads.map(l=>`<li class="${l.delivered?"done":""}"><span>${esc(l.job.from.name||l.job.from.biz)} <span class="arrow">→</span> ${esc(l.job.to.name||l.job.to.biz)}</span><span class="num">${weightStr(l.job)}</span><span class="lst">${l.delivered?"Last delivered":l.picked?"On board":"Waiting for pickup"}</span><span class="num">${money(l.job.pay*(1-(l.cut||0)))}</span></li>`).join("")}</ul>
@@ -1112,7 +1112,7 @@ function renderFleet(){
           <div class="btnrow"><button class="btn ghost sm" data-act="follow" data-id="${tr.id}">Follow on map</button><button class="btn ghost sm" data-act="askRen" data-id="${v.id}">Rename</button></div>${pendingConfirm===("ren"+v.id)?`<div class="btnrow"><input type="text" id="ren-${v.id}" maxlength="24" value="${esc(v.n)}" aria-label="New name for ${esc(v.n)}" style="flex:1;min-width:0;width:auto"><button class="btn sm" data-act="ren" data-id="${v.id}">Save</button><button class="btn ghost sm" data-act="cancel">Cancel</button></div>`:""}</div>`;
       } else {
         const confirm = pendingConfirm===("sell"+v.id);
-        h += `<div class="card"><div class="row"><b><span class="vic">${iconSvg(TYPE[v.type].mode,13)}</span>${esc(v.n)}</b><span class="status idle">Idle</span></div>
+        h += `<div class="card" id="vc-${v.id}"><div class="row"><b><span class="vic">${iconSvg(TYPE[v.type].mode,13)}</span>${esc(v.n)}</b><span class="status idle">Idle</span></div>
           <div class="meta"><span>${esc(ty.n)}</span><span class="num">${cap}</span><span class="num">${ty.leg} mi range</span><span>${v.jobs} jobs</span><span class="num">${Math.round(v.miles||0).toLocaleString("en-US")} mi lifetime</span></div>
           <div class="btnrow"><button class="btn ghost sm" data-act="askRen" data-id="${v.id}">Rename</button>${S.vehicles.length>1&&!confirm?`<button class="btn ghost sm" data-act="askSell" data-id="${v.id}">Sell</button>`:""}</div>${pendingConfirm===("ren"+v.id)?`<div class="btnrow"><input type="text" id="ren-${v.id}" maxlength="24" value="${esc(v.n)}" aria-label="New name for ${esc(v.n)}" style="flex:1;min-width:0;width:auto"><button class="btn sm" data-act="ren" data-id="${v.id}">Save</button><button class="btn ghost sm" data-act="cancel">Cancel</button></div>`:""}
           ${S.vehicles.length>1&&confirm?`<div class="btnrow">${confirm?`<button class="btn warn sm" data-act="sell" data-id="${v.id}">Sell for ${money(ty.price*0.6)}</button><button class="btn ghost sm" data-act="cancel">Keep it</button>`:`<button class="btn ghost sm" data-act="askSell" data-id="${v.id}">Sell</button>`}</div>`:""}</div>`;
@@ -1135,10 +1135,22 @@ function renderFleet(){
   }
   return h;
 }
+let flash = {id:null, until:0};
+// Open the Fleet page at one vehicle: expand its section, scroll to it and highlight it.
+function focusVehicle(vid){
+  const v = S.vehicles.find(x=>x.id===vid); if(!v) return;
+  const keys = isPlane(v) ? ["f-planes"] : isTrain(v) ? ["f-trains"] : ["f-trucks", "f-hub-"+v.base];
+  keys.forEach(k=>collapsed.delete(k)); try{ localStorage.setItem("freight-dispatch-collapsed", JSON.stringify([...collapsed])); }catch(_){}
+  setTab("fleet");
+  const el = document.getElementById("vc-"+vid); if(!el) return;
+  el.scrollIntoView({block:"center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"});
+  flash = {id:vid, until:Date.now()+2500}; el.classList.add("flash");
+  setTimeout(()=>document.getElementById("vc-"+vid)?.classList.remove("flash"), 2600);
+}
 function trainCard(v, t){
   const ty = TYPE[v.type], tr = tripOf(v), y = YARD[v.yard];
   const consist = Object.entries(v.cars||{}).filter(([,n])=>n).map(([k,n])=>`${n} × ${RAILCARS[k].n}`).join(" · ") || "No railcars yet. Add some below.";
-  let h = `<div class="card"><div class="row"><b><span class="vic">${iconSvg("train",13)}</span>${esc(v.n)}</b><span class="status ${tr?"busy":"idle"}" ${tr?`data-ph="${tr.id}"`:""}>${tr?esc(phaseText(tr,t)):"At the yard"}</span></div>
+  let h = `<div class="card" id="vc-${v.id}"><div class="row"><b><span class="vic">${iconSvg("train",13)}</span>${esc(v.n)}</b><span class="status ${tr?"busy":"idle"}" ${tr?`data-ph="${tr.id}"`:""}>${tr?esc(phaseText(tr,t)):"At the yard"}</span></div>
     <div class="meta"><span>${esc(ty.n)}</span><span>Home: ${esc(y.n)}, ${esc(y.city)} ${y.s}</span><span class="num">${trainCarCount(v)} of ${ty.maxCars} cars</span><span class="num">${ty.leg} mi range</span><span class="num">${Math.round(v.miles||0).toLocaleString("en-US")} mi lifetime</span></div>
     <p class="hint" style="margin:0;color:var(--ink)">${esc(consist)}</p>`;
   if(tr){
@@ -1157,7 +1169,7 @@ function trainCard(v, t){
 }
 function planeCard(v, t){
   const ty = TYPE[v.type], tr = tripOf(v), a = AIRPORT[v.airport];
-  let h = `<div class="card"><div class="row"><b><span class="vic">${iconSvg("plane",13)}</span>${esc(v.n)}</b><span class="status ${tr?"busy":"idle"}" ${tr?`data-ph="${tr.id}"`:""}>${tr?esc(phaseText(tr,t)):"On the ground"}</span></div>
+  let h = `<div class="card" id="vc-${v.id}"><div class="row"><b><span class="vic">${iconSvg("plane",13)}</span>${esc(v.n)}</b><span class="status ${tr?"busy":"idle"}" ${tr?`data-ph="${tr.id}"`:""}>${tr?esc(phaseText(tr,t)):"On the ground"}</span></div>
     <div class="meta"><span>${esc(ty.n)}</span><span>Home: ${esc(a.id)} ${esc(a.city)} ${a.s}</span><span class="num">${ty.cap.toLocaleString("en-US")} lb</span><span class="num">${ty.leg.toLocaleString("en-US")} mi range</span><span>${ty.lic==="pilot2"?"2 pilots":"1 pilot"}</span><span class="num">${Math.round(v.miles||0).toLocaleString("en-US")} mi lifetime</span></div>`;
   if(tr){
     const pct = Math.min(100,(t-tr.startAt)/((tr.endAt-tr.startAt)||1)*100), ns = nextStopAt(tr,t);
@@ -1340,6 +1352,7 @@ function renderPanel(){
   const ae = document.activeElement, keep = ae && ae.id && body.contains(ae) && ae.tagName==="INPUT" ? {id:ae.id, v:ae.value, a:ae.selectionStart, b:ae.selectionEnd} : null;
   body.innerHTML = tab==="jobs"?renderJobs("truck"):tab==="rail"?renderJobs("rail"):tab==="air"?renderJobs("air"):tab==="fleet"?renderFleet():tab==="shop"?renderShop():tab==="crew"?renderCrew():tab==="log"?renderLog():tab==="tasks"?renderTasks():tab==="settings"?renderSettings():renderCompany();
   body.scrollTop = st;
+  if(Date.now() < flash.until) document.getElementById("vc-"+flash.id)?.classList.add("flash");
   if(keep){ const el = document.getElementById(keep.id); if(el){ el.value = keep.v; el.focus(); try{ el.setSelectionRange(keep.a, keep.b); }catch(_){} } }
   renderHeader();
 }
