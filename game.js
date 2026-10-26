@@ -223,7 +223,7 @@ function vehicleFor(v, j){
   if(j.weight > t.cap) return {ok:false, why:"Too heavy"};
   if(j.miles > t.leg) return {ok:false, why:`Over ${t.leg} mi range`};
   if(v.busy) return {ok:false, why:"On a job", busy:true};
-  if(estMi(startPt(v), j.from) > MAX_DEADHEAD) return {ok:false, why:"Too far away"};
+  if(estMi(startPt(v), j.from) > MAX_DEADHEAD) return {ok:false, why:`Over ${MAX_DEADHEAD} mi from the pickup`};
   const rt = returnTrip(v);
   let ds;
   if(rt){ // keep the crew that is already in the cab

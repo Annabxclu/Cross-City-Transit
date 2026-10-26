@@ -79,7 +79,7 @@ const FIRST = ["Marcus","Dana","Luis","Keisha","Travis","Rosa","Dwayne","Megan",
 const LAST = ["Brooks","Ortiz","Hale","Washington","Price","Nguyen","Carter","Reyes","Mills","Jenkins","Parker","Diaz","Cole","Bishop","Foster","Ramos","Banks","Lowe","Grant","Avery"];
 const DRV_LEVELS = [0,5,15,30,50];
 const GARAGE_PRICE = 40000, GARAGE_LVL = 1, SLOT_PRICE = 15000, DISPATCH_PRICE = 15000, DISPATCH_LVL = 8, HAZMAT_PRICE = 10000;
-const RADIUS_MI = 150, MAX_DEADHEAD = 450, BOARD_PER_BASE = 10, MIN = 60000;
+const RADIUS_MI = 150, MAX_DEADHEAD = 300, BOARD_PER_BASE = 10, MIN = 60000;
 const UNLOCKS = {2:"Box truck",5:"Reefer box truck",6:"CDL drivers and straight truck",8:"Dispatchers",10:"Semi + dry van",12:"Semi + reefer",14:"Semi + flatbed",15:"Rail depots (next build)",18:"Tankers and hazmat training",20:"Car haulers, air cargo (next build)",25:"Team-driven semi"};
 
 
