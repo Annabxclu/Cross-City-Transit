@@ -511,7 +511,7 @@ function renderTasks(){
   const ls = loginStatus(), ev = activeEvent(), d = S.daily;
   let h = `<section class="sec"><div class="sec-head"><h2>Daily login</h2><span class="hint">${ls.claimedToday?"Come back tomorrow":`Day ${ls.dayIdx+1} of 7`}</span></div>
     <div class="streak">${LOGIN_REWARDS.map((a,i)=>{ const cur = ls.claimedToday ? (ls.streak-1)%7 : ls.dayIdx; const done = i<cur || (ls.claimedToday && i===cur);
-      return `<div class="sday ${done?"done":""} ${!ls.claimedToday&&i===cur?"now":""}"><span>Day ${i+1}</span><b class="num">${money(a)}</b></div>`; }).join("")}</div>
+      return `<div class="sday ${done?"done":""} ${!ls.claimedToday&&i===cur?"now":""}"><span>Day ${i+1}</span><b class="num">${a>=1000?"$"+(a/1000)+"K":money(a)}</b></div>`; }).join("")}</div>
     ${ls.claimedToday?`<p class="hint">Claimed today. Log in tomorrow for day ${(ls.dayIdx+1)%7+1} (${money(LOGIN_REWARDS[(ls.dayIdx+1)%7])}). Missing a day starts the week over.</p>`
       :`<div class="btnrow"><button class="btn" data-act="claimLogin">Claim ${money(ls.amount)}</button><span class="hint">Missing a day starts the week over.</span></div>`}
   </section>`;
@@ -545,7 +545,7 @@ function showLoginPopup(){
   const ls = loginStatus(); if(ls.claimedToday) return;
   const ev = activeEvent();
   $("#loginT").textContent = `Day ${ls.dayIdx+1} reward`;
-  $("#loginBody").innerHTML = `<div class="streak">${LOGIN_REWARDS.map((a,i)=>`<div class="sday ${i<ls.dayIdx?"done":""} ${i===ls.dayIdx?"now":""}"><span>Day ${i+1}</span><b class="num">${money(a)}</b></div>`).join("")}</div>
+  $("#loginBody").innerHTML = `<div class="streak">${LOGIN_REWARDS.map((a,i)=>`<div class="sday ${i<ls.dayIdx?"done":""} ${i===ls.dayIdx?"now":""}"><span>Day ${i+1}</span><b class="num">${a>=1000?"$"+(a/1000)+"K":money(a)}</b></div>`).join("")}</div>
     ${ev?`<p class="hint" style="color:var(--ink)"><b>${esc(ev.n)}</b> is on for ${longDur(eventEndsIn(ev))}. Deliver event loads for bonus rewards.</p>`:""}
     <button class="btn" id="loginClaim">Claim ${money(ls.amount)}</button>`;
   $("#loginOv").hidden = false;
