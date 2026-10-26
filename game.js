@@ -96,7 +96,7 @@ function newGame(co, cityIdx){
   const c = CITIES[cityIdx];
   const b = {id:nid("b"), city:cityIdx, pt:offsetPt(c.lat,c.lon,rnd(1,3),rnd(0,6.28)), tier:0, dispatcher:false, home:true};
   S.bases.push(b);
-  S.drivers.push({id:nid("d"), name:"You", kind:"owner", jobs:0, busy:false, hazmat:false, earned:0});
+  S.drivers.push({id:nid("d"), name:`${pick(FIRST)} ${pick(LAST)}`, kind:"std", jobs:0, busy:false, hazmat:false, earned:0});
   S.vehicles.push({id:nid("v"), type:"van", base:b.id, n:"Van 1", busy:false, jobs:0});
   S.nextJobAt = JOB_EVERY_MS; spawnJob(b); spawnJob(b);
 }
@@ -120,7 +120,8 @@ function spawnJob(base, depth=0){
   const origin = Math.random()<0.45 ? base.city : pick(near);
   const r = Math.random();
   const tier = r<0.45?"local": r<0.8?"regional": r<0.94?"long":"cross";
-  const ranges = {regional:[50,250],long:[250,Math.min(800,t.leg)],cross:[800,t.leg]};
+  const maxLeg = t.leg*0.85; // leave room: real road miles run a little longer than the estimate
+  const ranges = {regional:[50,Math.min(250,maxLeg)],long:[250,Math.min(800,maxLeg)],cross:[800,maxLeg]};
   let dest = origin;
   if(tier!=="local" && ranges[tier][1]>ranges[tier][0]){
     const [a,bm] = ranges[tier];
@@ -249,7 +250,14 @@ function deliver(tr){
 }
 function logic(){
   let changed = false;
-  for(const tr of S.trips) if(!tr.delivered && S.clock>=tr.deliverAt){ deliver(tr); changed=true; }
+  for(const tr of S.trips){
+    if(!tr.pickedUp && S.clock>=tr.segs[1].t1){
+      tr.pickedUp = true; changed = true;
+      const v = S.vehicles.find(x=>x.id===tr.v);
+      if(!awayLog) toast(`<b>${esc(v?v.n:"Truck")}</b> picked up ${esc(weightStr(tr.job))} of ${esc(CARGO[tr.job.cargo].n.toLowerCase())} at ${esc(tr.job.from.name||tr.job.from.biz)}`);
+    }
+    if(!tr.delivered && S.clock>=tr.deliverAt){ deliver(tr); changed=true; }
+  }
   const done = S.trips.filter(tr=>S.clock>=tr.endAt);
   if(done.length){
     done.forEach(tr=>{const v=S.vehicles.find(x=>x.id===tr.v); if(v)v.busy=false; tr.drivers.forEach(id=>{const d=S.drivers.find(x=>x.id===id); if(d)d.busy=false;});});
@@ -292,7 +300,8 @@ try{ new ResizeObserver(()=>map.invalidateSize()).observe(document.getElementByI
 window.addEventListener("load", ()=>map.invalidateSize());
 const layerRings = L.layerGroup().addTo(map), layerRoutes = L.layerGroup().addTo(map), layerSel = L.layerGroup().addTo(map),
       layerBases = L.layerGroup().addTo(map), layerJobs = L.layerGroup().addTo(map), layerVeh = L.layerGroup().addTo(map);
-const jobMarkers = new Map(), vehMarkers = new Map(), tripLines = new Map();
+const jobMarkers = new Map(), vehMarkers = new Map(), tripLines = new Map(), stopMarkers = new Map();
+const layerStops = L.layerGroup().addTo(map);
 const PIN_SVG = '<svg width="22" height="28" viewBox="0 0 22 28"><path class="body" d="M11 27C9 22 2 17 2 10.5A9 9 0 0 1 20 10.5C20 17 13 22 11 27Z"/><circle class="hole" cx="11" cy="10.5" r="3.4"/></svg>';
 map.on("click", ()=>{ if(selectedJob){ selectedJob=null; drawJobs(); renderPanel(); } });
 
@@ -380,6 +389,21 @@ function frame(){
     }
     for(const [id,m] of vehMarkers) if(!live.has(id)){ layerVeh.removeLayer(m); vehMarkers.delete(id); }
     for(const [id,l] of tripLines) if(!live.has(id)){ layerRoutes.removeLayer(l); tripLines.delete(id); }
+    // Pickup and drop-off markers for every load on the road
+    for(const tr of S.trips){
+      let sm = stopMarkers.get(tr.id);
+      if(!sm){
+        const j = tr.job;
+        sm = {
+          pick: L.marker([j.from.lat,j.from.lon], {icon:L.divIcon({className:"", html:'<div class="mk-stop pick">P</div>', iconSize:[20,20], iconAnchor:[10,10]}), title:`Pickup: ${j.from.name||j.from.biz}`, zIndexOffset:600}).addTo(layerStops),
+          drop: L.marker([j.to.lat,j.to.lon], {icon:L.divIcon({className:"", html:'<div class="mk-stop drop">D</div>', iconSize:[20,20], iconAnchor:[10,10]}), title:`Drop-off: ${j.to.name||j.to.biz}`, zIndexOffset:600}).addTo(layerStops)
+        };
+        stopMarkers.set(tr.id, sm);
+      }
+      if(t>=tr.segs[1].t1 && sm.pick){ layerStops.removeLayer(sm.pick); sm.pick=null; }
+      if(t>=tr.deliverAt && sm.drop){ layerStops.removeLayer(sm.drop); sm.drop=null; }
+    }
+    for(const [id,sm] of stopMarkers) if(!live.has(id)){ if(sm.pick) layerStops.removeLayer(sm.pick); if(sm.drop) layerStops.removeLayer(sm.drop); stopMarkers.delete(id); }
   }
   requestAnimationFrame(frame);
 }
@@ -453,7 +477,10 @@ function renderJobs(){
   if(cant.length) h += `<section class="sec"><div class="sec-head"><h2>Other jobs nearby</h2><span class="hint num">${cant.length}</span></div><div class="list">${cant.map(x=>jobCard(x.j)).join("")}</div></section>`;
   return h;
 }
-function phaseText(tr,t){const p=segAt(tr,t).ph;return p==="dead"?"Heading to pickup":p==="load"?(t<tr.deliverAt-1?"Loading":"Unloading"):p==="haul"?"Loaded, on the way":"Returning to garage";}
+function phaseText(tr,t){
+  const p=segAt(tr,t).ph, f=tr.job.from.name||tr.job.from.biz, d=tr.job.to.name||tr.job.to.biz;
+  return p==="dead"?`Heading to pickup at ${f}`:p==="load"?(t<tr.segs[2].t0?`Loading at ${f}`:`Unloading at ${d}`):p==="haul"?`Loaded, delivering to ${d}`:"Empty, returning to garage";
+}
 function renderFleet(){
   const t = displayClock();
   let h = `<section class="sec"><div class="sec-head"><h2>Your fleet</h2><span class="hint num">${S.vehicles.length} vehicles</span></div><div class="list">`;
@@ -624,7 +651,7 @@ $("#panelBody").addEventListener("click", e=>{
   if(a==="reset"){
     try{localStorage.removeItem(KEY);}catch(_){}
     S=null; selectedJob=null; pendingConfirm=null; following=null;
-    [layerJobs,layerBases,layerRings,layerVeh,layerRoutes,layerSel].forEach(l=>l.clearLayers()); jobMarkers.clear(); vehMarkers.clear(); tripLines.clear();
+    [layerJobs,layerBases,layerRings,layerVeh,layerRoutes,layerSel,layerStops].forEach(l=>l.clearLayers()); stopMarkers.clear(); jobMarkers.clear(); vehMarkers.clear(); tripLines.clear();
     $("#panelBody").innerHTML=""; showStart(); return;
   }
 });
@@ -653,7 +680,7 @@ $("#startForm").addEventListener("submit", e=>{
   $("#startOv").hidden = true;
   afterLoad();
   const p = basePt(S.bases[0]); map.flyTo([p.lat,p.lon], 10, {duration:1.2});
-  toast("Your van is parked at HQ. Pick a job to start earning.", 5000);
+  toast(`${esc(S.drivers[0].name)} is waiting at HQ with your van. Pick a job to start earning.`, 5000);
   save();
 });
 

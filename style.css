@@ -180,3 +180,7 @@ label.fld{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(
 .mk-veh.dead{background:#6b7772}.mk-veh.load{background:#e08a00}.mk-veh.haul{background:#1f56c4}.mk-veh.ret{background:#2a8a50}
 .legend,.maptools,#toasts{z-index:500}
 .mapnote{position:absolute;right:calc(12px + env(safe-area-inset-right,0px));bottom:26px;z-index:500;background:var(--surface);border:1px solid var(--line);border-radius:5px;padding:4px 8px;font-size:11.5px;color:var(--muted)}
+.mk-stop{width:20px;height:20px;border-radius:4px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45);display:grid;place-items:center;font-family:var(--display);font-weight:700;font-size:11px;color:#fff}
+.mk-stop.pick{background:#e08a00}
+.mk-stop.drop{background:#c8372a}
+.card .status.busy{text-align:right;max-width:65%;line-height:1.25}
