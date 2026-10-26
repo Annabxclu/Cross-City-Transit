@@ -342,7 +342,7 @@ function simulateAway(ms){
 
 /* ---------------- Settings ---------------- */
 const LOGIN_REWARDS = [1000, 2000, 3000, 4000, 5000, 6000, 10000];   // day 1..7, then the week starts again
-const ALL_TASKS_BONUS = 3000;     // claim after finishing every daily task
+const ALL_TASKS_BONUS = 10000;    // claim after finishing every daily task (flat, does not grow with level)
 const EVENT_PAY_BONUS = 1.25;     // event loads pay 25% more
 const EVENT_SHARE = 0.35;         // share of new jobs that are event loads while an event runs
 
@@ -473,7 +473,7 @@ function claimTask(id){
 const allTasksDone = () => S.daily.tasks.every(t=>t.claimed);
 function claimBonus(){
   if(S.daily.bonusClaimed || !allTasksDone()) return;
-  const r = roundReward(ALL_TASKS_BONUS); S.daily.bonusClaimed = true; S.cash += r;
+  const r = ALL_TASKS_BONUS; S.daily.bonusClaimed = true; S.cash += r;
   toast(`All daily tasks complete <span class="num">+${money(r)}</span>`, 5000);
 }
 function claimMilestone(n){
@@ -531,7 +531,7 @@ function renderTasks(){
       return `<div class="task ${t.claimed?"claimed":""}"><div class="row"><span>${esc(taskLabel(t))}</span><span class="pay">${money(t.reward)}</span></div>
         ${bar(t.progress, t.target, t.kind==="event"?ev?.color:null)}
         <div class="row"><span class="hint num">${t.progress.toLocaleString("en-US")} / ${t.target.toLocaleString("en-US")}</span>${t.claimed?`<span class="ok">Claimed</span>`:ready?`<button class="btn sm" data-act="claimTask" data-id="${t.id}">Claim</button>`:""}</div></div>`; }).join("")}
-      <div class="task bonus ${d.bonusClaimed?"claimed":""}"><div class="row"><b>Finish every daily task</b><span class="pay">${money(roundReward(ALL_TASKS_BONUS))}</span></div>
+      <div class="task bonus ${d.bonusClaimed?"claimed":""}"><div class="row"><b>Finish every daily task</b><span class="pay">${money(ALL_TASKS_BONUS)}</span></div>
         ${bar(d.tasks.filter(t=>t.claimed).length, d.tasks.length)}
         <div class="row"><span class="hint num">${d.tasks.filter(t=>t.claimed).length} / ${d.tasks.length} claimed</span>${d.bonusClaimed?`<span class="ok">Claimed</span>`:allTasksDone()?`<button class="btn sm" data-act="claimBonus">Claim</button>`:""}</div></div>
     </div></section>`;
