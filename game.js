@@ -335,17 +335,21 @@ function simulateAway(ms){
 const map = L.map("map", {zoomControl:true, worldCopyJump:false, minZoom:4, maxZoom:18, preferCanvas:false}).setView([38.5,-96], 4);
 // Map styles players can switch between (all free, no API key).
 const OSM = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
-const CARTO = OSM + ' &copy; <a href="https://carto.com/attributions">CARTO</a>';
 const ESRI = 'Tiles &copy; <a href="https://www.esri.com">Esri</a>';
+const EB = "https://server.arcgisonline.com/ArcGIS/rest/services/";
 const MAP_STYLES = {
-  standard:  {n:"Standard",       layers:[[TILE_URL, {maxZoom:19, attribution:TILE_ATTR}]]},
-  voyager:   {n:"Clean (Apple-like)", layers:[["https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {maxZoom:20, subdomains:"abcd", attribution:CARTO}]]},
-  light:     {n:"Light",          layers:[["https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {maxZoom:20, subdomains:"abcd", attribution:CARTO}]]},
-  dark:      {n:"Dark",           layers:[["https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {maxZoom:20, subdomains:"abcd", attribution:CARTO}]]},
-  street:    {n:"Street (Esri)",  layers:[["https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", {maxZoom:19, attribution:ESRI}]]},
-  satellite: {n:"Satellite",      layers:[["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {maxZoom:19, attribution:ESRI+", Maxar, Earthstar Geographics"}],
-                                         ["https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}", {maxZoom:19}],
-                                         ["https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", {maxZoom:19}]]}
+  standard:  {n:"Standard",      layers:[[TILE_URL, {maxZoom:19, attribution:TILE_ATTR}]]},
+  street:    {n:"Street",        layers:[[EB+"World_Street_Map/MapServer/tile/{z}/{y}/{x}", {maxZoom:19, attribution:ESRI}]]},
+  topo:      {n:"Topographic",   layers:[[EB+"World_Topo_Map/MapServer/tile/{z}/{y}/{x}", {maxZoom:19, attribution:ESRI}]]},
+  light:     {n:"Light gray",    layers:[[EB+"Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}", {maxZoom:16, attribution:ESRI}],
+                                         [EB+"Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}", {maxZoom:16}],
+                                         [EB+"Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}", {maxZoom:19, opacity:.6}]]},
+  dark:      {n:"Dark gray",     layers:[[EB+"Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", {maxZoom:16, attribution:ESRI}],
+                                         [EB+"Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}", {maxZoom:16}]]},
+  humanitarian:{n:"Humanitarian", layers:[["https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png", {maxZoom:19, subdomains:"abc", attribution:OSM+', <a href="https://www.hotosm.org/">HOT</a>'}]]},
+  satellite: {n:"Satellite",     layers:[[EB+"World_Imagery/MapServer/tile/{z}/{y}/{x}", {maxZoom:19, attribution:ESRI+", Maxar, Earthstar Geographics"}],
+                                         [EB+"Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}", {maxZoom:19}],
+                                         [EB+"Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", {maxZoom:19}]]}
 };
 let baseLayers = [];
 function setMapStyle(key){
