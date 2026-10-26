@@ -146,7 +146,8 @@ const iconSvg = (mode, size=14) => `<svg width="${size}" height="${size}" viewBo
 /* Timing (Mission Chief style: real time at 1x clock speed).
    Driving uses the real road route's drive time, slowed for bigger vehicles.
    Loading and unloading take longer the heavier the load. */
-const PAY_SCALE = 6;                 // pay multiplier to match the slower, real-time trips
+const PAY_SCALE = 3;                 // pay multiplier to fit trip length
+const DRIVE_TIME_FACTOR = 1/3;       // trucks drive in one third of the real GPS time
 const AVG_MPH_NO_ROUTE = 48;         // used until the real route comes back
 const LOAD_BASE_MIN = 5;             // dock check-in, paperwork, securing the load
 const LOAD_MIN_PER_1000LB = 0.6;     // 3,000 lb ≈ 7 min, 10,000 lb ≈ 11 min, 45,000 lb ≈ 32 min

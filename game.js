@@ -193,14 +193,21 @@ function freeDrivers(lic, cargo){
   if(lic==="cdl") return c[0]?[c[0]]:null;
   return c.length>=2?[c[0],c[1]]:null;
 }
-const driveMs = (miles, sec, slow, f) => (sec ? sec*1000 : miles/AVG_MPH_NO_ROUTE*3600e3) * slow * f;
+const driveMs = (miles, sec, slow, f) => (sec ? sec*1000 : miles/AVG_MPH_NO_ROUTE*3600e3) * slow * f * DRIVE_TIME_FACTOR;
 function handleMs(j){ // loading or unloading time for this load
   const m = j.cargo==="vehicles" ? LOAD_BASE_MIN + LOAD_MIN_PER_CAR*j.weight : LOAD_BASE_MIN + LOAD_MIN_PER_1000LB*j.weight/1000;
   return m*MIN;
 }
+// A vehicle that has delivered and is heading home can take a new job from wherever it is.
+const returnTrip = v => v.ret ? S.trips.find(tr=>tr.id===v.ret) : null;
+function startPt(v){
+  const tr = returnTrip(v);
+  if(tr){ const ll = posOf(tr, S.clock).ll; return {lat:ll[0], lon:ll[1]}; }
+  return basePt(baseById(v.base));
+}
 function planTrip(v, j, drivers){
-  const t = TYPE[v.type], bp = basePt(baseById(v.base));
-  const dead = estMi(bp, j.from), back = estMi(j.to, bp);
+  const t = TYPE[v.type], bp = basePt(baseById(v.base)), sp = startPt(v);
+  const dead = estMi(sp, j.from), back = estMi(j.to, bp);
   const lv = Math.max(...drivers.map(drvLevel));
   const f = 1-0.03*(lv-1);
   const ld = handleMs(j), lu = handleMs(j);
@@ -213,9 +220,15 @@ function vehicleFor(v, j){
   if(!t.cargo.includes(j.cargo)) return {ok:false, why:"Wrong trailer"};
   if(j.weight > t.cap) return {ok:false, why:"Too heavy"};
   if(j.miles > t.leg) return {ok:false, why:`Over ${t.leg} mi range`};
-  if(estMi(basePt(baseById(v.base)), j.from) > MAX_DEADHEAD) return {ok:false, why:"Hub too far"};
   if(v.busy) return {ok:false, why:"On a job", busy:true};
-  const ds = freeDrivers(t.lic, j.cargo);
+  if(estMi(startPt(v), j.from) > MAX_DEADHEAD) return {ok:false, why:"Too far away"};
+  const rt = returnTrip(v);
+  let ds;
+  if(rt){ // keep the crew that is already in the cab
+    const crew = rt.drivers.map(id=>S.drivers.find(d=>d.id===id)).filter(Boolean);
+    const okLic = t.lic==="std" || crew.every(d=>d.kind==="cdl" && (j.cargo!=="hazmat"||d.hazmat));
+    ds = okLic ? crew : null;
+  } else ds = freeDrivers(t.lic, j.cargo);
   if(!ds) return {ok:false, why: t.lic==="std"?"No free driver": j.cargo==="hazmat"?"Needs hazmat driver": t.lic==="cdl2"?"Needs 2 free CDL drivers":"No free CDL driver", nodriver:true};
   return {ok:true, drivers:ds, plan:planTrip(v,j,ds)};
 }
@@ -233,10 +246,12 @@ function jobStatus(j){
 function mkSeg(ph, path, t0, t1){ return {ph, path, t0, t1}; }
 function dispatch(j, v, viaDispatcher){
   const r = vehicleFor(v,j); if(!r.ok) return false;
+  const rt = returnTrip(v), A = startPt(v);
+  if(rt){ S.trips = S.trips.filter(x=>x!==rt); v.ret = null; }
   const p = r.plan, base = baseById(v.base), B = basePt(base), O = {lat:j.from.lat,lon:j.from.lon}, D = {lat:j.to.lat,lon:j.to.lon};
   const t0 = S.clock, a = t0+p.tDead, b = a+p.ld, c = b+p.tHaul, d = c+p.lu, e = d+p.tBack;
   const trip = {id:nid("t"), v:v.id, drivers:r.drivers.map(x=>x.id), job:{...j, path:undefined},
-    segs:[ mkSeg("dead",straight(B,O),t0,a), mkSeg("load",[[O.lat,O.lon]],a,b), mkSeg("haul", j.path||straight(O,D), b,c),
+    segs:[ mkSeg("dead",straight(A,O),t0,a), mkSeg("load",[[O.lat,O.lon]],a,b), mkSeg("haul", j.path||straight(O,D), b,c),
            mkSeg("load",[[D.lat,D.lon]],c,d), mkSeg("ret",straight(D,B),d,e) ],
     deliverAt:d, endAt:e, gross:Math.round(j.pay*p.bonus), cut:p.cut+(viaDispatcher?0.05:0), delivered:false, auto:!!viaDispatcher};
   S.trips.push(trip);
@@ -278,11 +293,11 @@ function logic(){
       const v = S.vehicles.find(x=>x.id===tr.v);
       if(!awayLog) toast(`<b>${esc(v?v.n:"Truck")}</b> picked up ${esc(weightStr(tr.job))} of ${esc(CARGO[tr.job.cargo].n.toLowerCase())} at ${esc(tr.job.from.name||tr.job.from.biz)}`);
     }
-    if(!tr.delivered && S.clock>=tr.deliverAt){ deliver(tr); changed=true; }
+    if(!tr.delivered && S.clock>=tr.deliverAt){ deliver(tr); const v=S.vehicles.find(x=>x.id===tr.v); if(v){ v.busy=false; v.ret=tr.id; } changed=true; }
   }
   const done = S.trips.filter(tr=>S.clock>=tr.endAt);
   if(done.length){
-    done.forEach(tr=>{const v=S.vehicles.find(x=>x.id===tr.v); if(v)v.busy=false; tr.drivers.forEach(id=>{const d=S.drivers.find(x=>x.id===id); if(d)d.busy=false;});});
+    done.forEach(tr=>{const v=S.vehicles.find(x=>x.id===tr.v); if(v){ v.busy=false; if(v.ret===tr.id) v.ret=null; } tr.drivers.forEach(id=>{const d=S.drivers.find(x=>x.id===id); if(d)d.busy=false;});});
     S.trips = S.trips.filter(tr=>S.clock<tr.endAt); changed = true;
   }
   const n0 = S.jobs.length;
@@ -501,7 +516,7 @@ function renderJobs(){
 }
 function phaseText(tr,t){
   const p=segAt(tr,t).ph, f=tr.job.from.name||tr.job.from.biz, d=tr.job.to.name||tr.job.to.biz;
-  return p==="dead"?`Heading to pickup at ${f}`:p==="load"?(t<tr.segs[2].t0?`Loading at ${f}`:`Unloading at ${d}`):p==="haul"?`Loaded, delivering to ${d}`:"Empty, returning to hub";
+  return p==="dead"?`Heading to pickup at ${f}`:p==="load"?(t<tr.segs[2].t0?`Loading at ${f}`:`Unloading at ${d}`):p==="haul"?`Loaded, delivering to ${d}`:"Returning to hub · ready for a new job";
 }
 function renderFleet(){
   const t = displayClock();
