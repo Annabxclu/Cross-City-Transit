@@ -924,10 +924,10 @@ function renderCrew(){
   return h + `</section>`;
 }
 function renderLog(){
-  const items = (S.log||[]).slice().reverse();
+  const items = (S.log||[]).slice(-20).reverse();
   const fmt = t => new Date(t).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit",second:"2-digit"});
   return `<section class="sec"><div class="sec-head"><h2>Activity log</h2><span class="hint num">${items.length} entries</span></div>
-    <p class="hint">Everything your company does: new jobs, dispatches, pickups, deliveries, purchases and level-ups. Newest first, last 300 kept.</p>
+    <p class="hint">Everything your company does: new jobs, dispatches, pickups, deliveries, purchases and level-ups. Newest first, last 20 kept.</p>
     ${items.length?`<ol class="log">${items.map(e=>`<li><time class="num">${fmt(e.t)}</time><span>${e.h}</span></li>`).join("")}</ol>`:`<p class="hint">Nothing yet. Dispatch a job and it shows up here.</p>`}</section>`;
 }
 function renderCompany(){
@@ -1044,7 +1044,7 @@ $("#panelBody").addEventListener("keydown", e=>{ if(e.key==="Enter" && e.target.
 $("#panelBody").addEventListener("change", e=>{ if(e.target.name==="veh") chosenVeh=e.target.value; });
 document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>setTab(b.dataset.tab)));
 
-function logEvent(html, when){ if(!S) return; (S.log ||= []).push({t: when||Date.now(), h: html}); if(S.log.length>300) S.log.splice(0, S.log.length-300); if(tab==="log" && !simulating) renderPanel(); }
+function logEvent(html, when){ if(!S) return; (S.log ||= []).push({t: when||Date.now(), h: html}); if(S.log.length>20) S.log.splice(0, S.log.length-20); if(tab==="log" && !simulating) renderPanel(); }
 function toast(html, ms=3800, noLog){
   if(!noLog) logEvent(html);
   const t = document.createElement("div"); t.className="toast"; t.innerHTML=html; $("#toasts").appendChild(t);
