@@ -1,4 +1,4 @@
-/* Freight Dispatch — game logic and street map.
+/* Cross-City Transit — game logic and street map.
    Map tiles: OpenStreetMap. Road routes: OSRM (public demo server). */
 (() => {
 "use strict";
@@ -497,7 +497,7 @@ function simulateAway(ms){
   const log = awayLog; awayLog = null; return log;
 }
 
-/* Freight Dispatch — daily login rewards, daily tasks and seasonal events.
+/* Cross-City Transit — daily login rewards, daily tasks and seasonal events.
    Loaded before game.js. Dates use the player's local calendar day. */
 
 /* ---------------- Settings ---------------- */
