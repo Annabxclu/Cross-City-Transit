@@ -904,17 +904,17 @@ function frame(){
     const t = displayClock(), live = new Set();
     for(const tr of S.trips){
       live.add(tr.id);
-      const p = posOf(tr,t);
+      const p = posOf(tr,t), vc = p.ph==="load" ? (p.s?.sk==="drop" ? "unload" : "load") : p.ph;   // marker color by stage
       let m = vehMarkers.get(tr.id);
       const v = S.vehicles.find(x=>x.id===tr.v);
       const mode = v ? (TYPE[v.type]?.mode||"truck") : "truck";
       if(!m){
-        m = L.marker(p.ll, {icon:L.divIcon({className:"", html:`<div class="mk-veh ${p.ph}">${iconSvg(mode,15)}</div>`, iconSize:[26,26], iconAnchor:[13,13]}), zIndexOffset:800, title:v?`${v.n} · ${TYPE[v.type]?.n||""}`:"Truck"});
+        m = L.marker(p.ll, {icon:L.divIcon({className:"", html:`<div class="mk-veh ${vc}">${iconSvg(mode,15)}</div>`, iconSize:[26,26], iconAnchor:[13,13]}), zIndexOffset:800, title:v?`${v.n} · ${TYPE[v.type]?.n||""}`:"Truck"});
         m.on("click", e=>{ L.DomEvent.stopPropagation(e); setTab("fleet"); });
-        m.addTo(layerVeh); vehMarkers.set(tr.id, m); m._ph = p.ph;
+        m.addTo(layerVeh); vehMarkers.set(tr.id, m); m._ph = vc;
       } else {
         m.setLatLng(p.ll);
-        if(m._ph!==p.ph){ const el=m.getElement()?.firstElementChild; if(el) el.className=`mk-veh ${p.ph}`; m._ph=p.ph; }
+        if(m._ph!==vc){ const el=m.getElement()?.firstElementChild; if(el) el.className=`mk-veh ${vc}`; m._ph=vc; }
       }
       // remaining road on the current leg, like a live navigation line
       let line = tripLines.get(tr.id);
