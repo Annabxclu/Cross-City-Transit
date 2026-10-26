@@ -1,6 +1,6 @@
 # Freight Dispatch
 
-A freight dispatch game in the style of Mission Chief. You start with $50,000 and a cargo van, take delivery jobs on a real street map, and grow into a trucking company. Trucks follow real roads, and the map shows the route each one is driving.
+A freight dispatch game in the style of Mission Chief. You start with a free hub you place on the map, a cargo van and a hired driver, take delivery jobs on a real street map, and grow into a trucking company. Trucks follow real roads, and the map shows the route each one is driving.
 
 ## Play it on GitHub Pages
 

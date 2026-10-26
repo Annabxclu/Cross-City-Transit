@@ -91,7 +91,7 @@ const hubCap = b => HUB_TIERS[b.tier||0].cap;
 const maxJobs = () => S.vehicles.length + 1;
 
 function newGame(co, stateCode, place){
-  S = {v:2, company:co, homeState:stateCode, clock:0, lastReal:Date.now(), speed:1, cash:50000, xp:0,
+  S = {v:2, company:co, homeState:stateCode, clock:0, lastReal:Date.now(), speed:1, cash:0, xp:0,
     earned:0, jobsDone:0, idc:0, payMult:1, bases:[], vehicles:[], drivers:[], jobs:[], trips:[], hired:0, log:[]};
   const b = {id:nid("b"), city:place.city, pt:place.pt, addr:place.addr, name:place.name||"HQ", tier:0, dispatcher:false, home:true};
   S.bases.push(b);
@@ -683,7 +683,7 @@ $("#panelBody").addEventListener("click", e=>{
     try{localStorage.removeItem(KEY);}catch(_){}
     S=null; selectedJob=null; pendingConfirm=null; following=null;
     [layerJobs,layerBases,layerRings,layerVeh,layerRoutes,layerSel,layerStops].forEach(l=>l.clearLayers()); stopMarkers.clear(); jobMarkers.clear(); vehMarkers.clear(); tripLines.clear();
-    $("#panelBody").innerHTML=""; $("#hdrCash").textContent="$50,000"; $("#hdrLvl").textContent="Level 1"; $("#hdrXp").style.width="0%"; $("#hdrTrips").textContent="0"; $("#jobBadge").textContent="0"; $("#hdrCo").textContent="New company"; endPlacement(); showStart(); return;
+    $("#panelBody").innerHTML=""; $("#hdrCash").textContent="$0"; $("#hdrLvl").textContent="Level 1"; $("#hdrXp").style.width="0%"; $("#hdrTrips").textContent="0"; $("#jobBadge").textContent="0"; $("#hdrCo").textContent="New company"; endPlacement(); showStart(); return;
   }
 });
 $("#panelBody").addEventListener("keydown", e=>{ if(e.key==="Enter" && e.target.id?.startsWith("ren-")){ e.preventDefault(); $(`[data-act=ren][data-id="${e.target.id.slice(4)}"]`)?.click(); }
