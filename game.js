@@ -900,7 +900,7 @@ function railNeeds(j){
 }
 function cargoChip(c){ return `<span class="chip" style="color:var(--c-${c})"><i></i><span style="color:var(--ink)">${esc(CARGO[c].n)}</span></span>`; }
 function urgTag(u){ return u==="standard"?"":`<span class="urg ${u}">${u}</span>`; }
-const MENU_PAGES = {shop:"Shop", crew:"Crew", tasks:"Tasks", log:"Log", company:"Company"};
+const MENU_PAGES = {fleet:"Fleet", shop:"Shop", crew:"Crew", tasks:"Tasks", log:"Log", company:"Company"};
 function markTabs(){
   document.querySelectorAll(".tab[data-tab]").forEach(b=>b.setAttribute("aria-selected", b.dataset.tab===tab));
   const inMenu = tab in MENU_PAGES;
@@ -962,6 +962,27 @@ function dispatchCard(j){
     ${opts}
   </section>`;
 }
+// Dispatched loads stay on the job tab until they are delivered, with a countdown.
+function activeLoads(rail){
+  const out = [];
+  for(const tr of S.trips) for(const l of tr.loads){
+    if(l.delivered || !!l.job.rail !== rail) continue;
+    const drop = tr.segs.find(sg=>sg.kind==="stop" && sg.sk==="drop" && sg.jid===l.job.id);
+    out.push({tr, l, due: drop ? drop.t1 : tr.endAt});
+  }
+  return out.sort((a,b)=>a.due-b.due);
+}
+function activeCard({tr, l, due}){
+  const j = l.job, v = S.vehicles.find(x=>x.id===tr.v), t = displayClock();
+  const total = Math.max(1, due - tr.startAt), pct = Math.min(100, Math.max(0, (t - tr.startAt)/total*100));
+  return `<div class="card active">
+    <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${j.rail?`<span class="chip railchip"><i></i>Rail</span>`:""}${j.event?evChip(j):""}${cargoChip(j.cargo)}</div><span class="pay">${money(j.pay*(1-(l.cut||0)))}</span></div>
+    <div class="route"><b>${esc(j.from.name||j.from.biz)}</b> <span class="arrow">→</span> <b>${esc(j.to.name||j.to.biz)}</b></div>
+    <div class="meta"><span class="num">${weightStr(j)}</span><span class="num">${j.miles} mi</span><span>${esc(v?v.n:"")}</span><span class="lst">${l.picked?"On board":"Heading to pickup"}</span></div>
+    <div class="prog"><i data-dueprog="${due}" data-start="${tr.startAt}" style="width:${pct}%"></i></div>
+    <div class="row"><span class="countdown">Delivers in <b class="num" data-due="${due}">${dur(due - t)}</b></span><button class="btn ghost sm" data-act="follow" data-id="${tr.id}">Follow on map</button></div>
+  </div>`;
+}
 function renderJobs(mode="truck"){
   const rail = mode==="rail";
   if(rail && level() < RAIL_LVL) return `<section class="sec"><h2>Train jobs</h2><div class="card dim"><div class="row"><b>Trains unlock at level ${RAIL_LVL}</b><span class="lock">Level ${RAIL_LVL}</span></div><p class="hint">Run trains between real freight yards on real track. You are level ${level()}.</p></div></section>`;
@@ -977,6 +998,8 @@ function renderJobs(mode="truck"){
   }
   if(!rail && S.jobsDone<1 && !sj) h += `<p class="hint" style="color:var(--ink)">Tap an orange pin on the map, or pick a job below, then send your van. Gray pins need a vehicle you do not own yet.</p>`;
   h += rail ? `<p class="hint">Train job board: ${railCount()} of ${maxRailJobs()} (one more than your ${S.vehicles.filter(isTrain).length} train${S.vehicles.filter(isTrain).length===1?"":"s"}). A new one posts every ${JOB_EVERY_MS/1000} seconds.</p>` : `<p class="hint">Truck job board: ${boardCount()} of ${maxJobs()} (one more than your ${trucks().length} truck${trucks().length===1?"":"s"}). A new one posts every ${JOB_EVERY_MS/1000} seconds.</p>`;
+  { const active = activeLoads(rail);
+    if(active.length) h += `<section class="sec"><div class="sec-head"><h2>In progress</h2><span class="hint num">${active.length}</span></div><div class="list">${active.map(a=>activeCard(a)).join("")}</div></section>`; }
   h += `<section class="sec"><div class="sec-head"><h2>Ready to run</h2><span class="hint num">${can.length}</span></div>${can.length?`<div class="list">${can.map(x=>jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. ${rail?"A new train job posts every 30 seconds.":"A new job posts every 30 seconds."}</p>`}</section>`;
   if(cant.length) h += `<section class="sec"><div class="sec-head"><h2>Other jobs nearby</h2><span class="hint num">${cant.length}</span></div><div class="list">${cant.map(x=>jobCard(x.j)).join("")}</div></section>`;
   return h;
@@ -1190,6 +1213,8 @@ function liveText(){
   if(!S) return;
   const t = displayClock();
   document.querySelectorAll("[data-exp]").forEach(e=>e.textContent=dur(+e.dataset.exp - S.clock));
+  document.querySelectorAll("[data-due]").forEach(e=>e.textContent=dur(+e.dataset.due - t));
+  document.querySelectorAll("[data-dueprog]").forEach(e=>{ const d=+e.dataset.dueprog, s0=+e.dataset.start; e.style.width = Math.min(100, Math.max(0, (t-s0)/Math.max(1,d-s0)*100))+"%"; });
   document.querySelectorAll("[data-eta]").forEach(e=>{const tr=S.trips.find(x=>x.id===e.dataset.eta); if(tr) e.textContent=dur(nextStopAt(tr,t).t-t);});
   document.querySelectorAll("[data-prog]").forEach(e=>{const tr=S.trips.find(x=>x.id===e.dataset.prog); if(tr) e.style.width=Math.min(100,(t-tr.startAt)/((tr.endAt-tr.startAt)||1)*100)+"%";});
   document.querySelectorAll("[data-ph]").forEach(e=>{const tr=S.trips.find(x=>x.id===e.dataset.ph); if(tr) e.textContent=phaseText(tr,t);});
