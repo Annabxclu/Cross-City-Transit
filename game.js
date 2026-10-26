@@ -205,48 +205,30 @@ function spawnJob(base, depth=0){
   if(!simulating) routeJob(j);
   return j;
 }
-/* Rail jobs: carloads between real yards, or intermodal chains (truck -> train -> truck). */
+/* Rail jobs: carloads between real yards. */
 function spawnRailJob(base){
   const L = level(), locos = LOCOS.filter(l=>l.lvl<=L); if(!locos.length) return null;
   const maxLeg = Math.max(...locos.map(l=>l.leg))*0.85, maxCars = Math.max(...locos.map(l=>l.maxCars));
   const anchors = S.bases.map(basePt).concat(S.vehicles.filter(v=>v.yard).map(v=>yardPt(v.yard)));
   const near = RAIL_YARDS.filter(y=>anchors.some(a=>hav(a,y)*1.2<=300));
   if(!near.length) return null;
-  if(L>=10 && Math.random()<0.45){ const c = spawnChain(maxLeg); if(c) return c; }
   const O = pick(near);
   const dests = RAIL_YARDS.filter(y=>y!==O && hav(O,y)*1.25>=80 && hav(O,y)*1.25<=maxLeg); if(!dests.length) return null;
   const D = pick(dests);
-  const owned = [...new Set(S.vehicles.filter(isTrain).flatMap(v=>Object.keys(v.cars||{}).filter(k=>v.cars[k]>0 && k!=="well")))];
-  const ct = owned.length && Math.random()<0.65 ? pick(owned) : pick(Object.keys(RAILCARS).filter(k=>k!=="well"));
+  const owned = [...new Set(S.vehicles.filter(isTrain).flatMap(v=>Object.keys(v.cars||{}).filter(k=>v.cars[k]>0)))];
+  const ct = owned.length && Math.random()<0.65 ? pick(owned) : pick(Object.keys(RAILCARS));
   const car = RAILCARS[ct], cargo = pick(car.cargo);
   const mine = Math.max(0, ...S.vehicles.filter(isTrain).map(v=>trainSlots(v, ct)));   // size jobs to the cars you own
   const units = Math.max(1, Math.round(rnd(1, mine ? Math.min(mine, maxCars) : Math.min(maxCars, 6))));
-  const weight = Math.round(units*car.cap*rnd(0.75,1)/1000)*1000;
+  const weight = Math.round(units*(car.unit ? car.perUnit : car.cap)*rnd(0.75,1)/1000)*1000;
   const j = {id:nid("j"), base:base.id, rail:true, carType:ct, units, cargo, weight, miles:Math.round(hav(O,D)*1.25), urg:"standard",
     from:{...yardStop(O)}, to:{...yardStop(D)}, posted:S.clock, expires:null, routed:false};
   j.pay = jobPay(j); S.jobs.push(j); if(!simulating) routeJob(j);
   return j;
 }
-function spawnChain(maxLeg){
-  const hubs = S.bases.map(basePt);
-  const Os = RAIL_YARDS.filter(y=>hubs.some(h=>hav(h,y)*1.2<=250)); if(!Os.length) return null;
-  const O = pick(Os);
-  const Ds = RAIL_YARDS.filter(y=>y!==O && hav(O,y)*1.25>=150 && hav(O,y)*1.25<=maxLeg && hubs.some(h=>hav(h,y)*1.2<=300));
-  if(!Ds.length) return null;
-  const D = pick(Ds), cid = nid("c"), weight = Math.round(rnd(28000, 42000)/500)*500;
-  const fb = offsetPt(O.lat, O.lon, rnd(5,25), rnd(0,6.28)); fb.c = nearestCity(fb); fb.biz = pick(PRODUCERS.general); fb.name = bizName(fb.biz); fb.num = houseNo();
-  const tb = offsetPt(D.lat, D.lon, rnd(5,25), rnd(0,6.28)); tb.c = nearestCity(tb); tb.biz = pick(ACCEPTORS.general); tb.name = bizName(tb.biz); tb.num = houseNo();
-  const common = {base:S.bases[0].id, cargo:"general", weight, urg:"standard", posted:S.clock, expires:null, routed:false};
-  const l1 = {...common, id:nid("j"), chain:{id:cid, leg:1}, from:fb, to:{...yardStop(O)}, miles:estMi(fb,O)};
-  const l2 = {...common, id:nid("j"), chain:{id:cid, leg:2}, rail:true, carType:"well", units:1, cargo:"containers", from:{...yardStop(O)}, to:{...yardStop(D)}, miles:Math.round(hav(O,D)*1.25), locked:true};
-  const l3 = {...common, id:nid("j"), chain:{id:cid, leg:3}, from:{...yardStop(D)}, to:tb, miles:estMi(D,tb), locked:true};
-  [l1,l2,l3].forEach(j=>{ j.pay = jobPay(j); S.jobs.push(j); if(!simulating) routeJob(j); });
-  (S.chains ||= {})[cid] = {paid:0, from:fb.name, to:tb.name};
-  return l1;
-}
 // Fetch the real road route for a job, then quote it by road miles.
 // A job is only worth posting if some vehicle you can already buy could run it.
-const fitsUnlocked = j => j.chain ? true : j.rail ? LOCOS.some(l=>l.lvl<=level() && l.leg>=j.miles) : TYPES.some(t=>t.lvl<=level() && t.cargo.includes(j.cargo) && t.cap>=j.weight && t.leg>=j.miles);
+const fitsUnlocked = j => j.rail ? LOCOS.some(l=>l.lvl<=level() && l.leg>=j.miles) : TYPES.some(t=>t.lvl<=level() && t.cargo.includes(j.cargo) && t.cap>=j.weight && t.leg>=j.miles);
 function routeJob(j){
   if(j.routed || j.routing) return;
   j.routing = true;
@@ -260,7 +242,7 @@ function routeJob(j){
       if(r.names){ j.from.street = r.names[0]; j.to.street = r.names[1]; }
       const m = jobMarkers.get(j.id); if(m) m.setLatLng([j.from.lat, j.from.lon]);
       // Real road miles can run past what any unlocked vehicle can reach; swap it for a new job.
-      if(!j.chain && !fitsUnlocked(j)){ S.jobs = S.jobs.filter(x=>x!==j); if(selectedJob===j.id) selectedJob=null; spawnJob(pick(S.bases)); drawJobs(); renderPanel(); return; }
+      if(!fitsUnlocked(j)){ S.jobs = S.jobs.filter(x=>x!==j); if(selectedJob===j.id) selectedJob=null; spawnJob(pick(S.bases)); drawJobs(); renderPanel(); return; }
     }
     if(j.id===selectedJob) drawSelection();
     if(tab==="jobs"||tab==="rail") renderPanel();
@@ -391,7 +373,6 @@ function vehicleFor(v, j){
   return {ok:true, drivers:ds, plan:planTrip(v,j)};
 }
 function jobStatus(j){
-  if(j.locked) return {can:false, locked:true, why:`Leg ${j.chain.leg} of 3 · opens when leg ${j.chain.leg-1} is delivered`};
   const opts = S.vehicles.map(v=>({v, r:vehicleFor(v,j)}));
   const ok = opts.filter(o=>o.r.ok).sort((a,b)=>a.r.plan.deliverIn-b.r.plan.deliverIn);
   if(ok.length) return {can:true, opts:ok};
@@ -455,13 +436,6 @@ function deliverLoad(tr, ld){
   const what = j.event ? esc(j.item.toLowerCase()) : esc(CARGO[j.cargo].n.toLowerCase());
   if(awayLog){awayLog.jobs++; awayLog.net+=net; logEvent(`<b>${esc(v?v.n:"Truck")}</b> delivered ${what} to ${esc(j.to.name||cityName(j.to.c))} <span class="num">+${money(net)}</span> (while you were away)`, simWhen());}
   else toast(`<b>${esc(v?v.n:"Truck")}</b> delivered ${what} to ${esc(j.to.name||j.to.biz)}, ${esc(cityName(j.to.c))} <span class="num">+${money(net)}</span>`);
-  if(j.chain){
-    const c = S.chains?.[j.chain.id]; if(c) c.paid += net;
-    const nx = S.jobs.find(x=>x.chain?.id===j.chain.id && x.chain.leg===j.chain.leg+1);
-    if(nx){ nx.locked = false; if(!awayLog) toast(`Intermodal leg ${nx.chain.leg} of 3 is ready at <b>${esc(nx.from.name)}</b>`, 5000); else logEvent(`Intermodal leg ${nx.chain.leg} of 3 is ready at <b>${esc(nx.from.name)}</b>`, simWhen()); }
-    else if(j.chain.leg===3 && c){ const b = Math.round(c.paid*CHAIN_BONUS); S.cash += b; S.earned += b; delete S.chains[j.chain.id];
-      const msg = `Intermodal chain complete: ${esc(c.from)} to ${esc(c.to)} <span class="num">+${money(b)}</span> bonus`; if(awayLog) logEvent(msg, simWhen()); else toast(msg, 6000); }
-  }
   const after = level();
   if(after>before && !simulating) drawYards();
   for(let L=before+1;L<=after;L++){ if(awayLog){ awayLog.levels.push(L); logEvent(`<b>Level ${L}</b>${UNLOCKS[L]?` · unlocked ${esc(UNLOCKS[L])}`:""}`, simWhen()); } else toast(`<b>Level ${L}</b>${UNLOCKS[L]?` · unlocked ${esc(UNLOCKS[L])}`:""}`, 6000); }
@@ -678,7 +652,7 @@ function claimableCount(){
 /* ---------------- Event jobs ---------------- */
 // Turns a freshly posted job into an event load when an event is running.
 function maybeEventJob(j){
-  if(j.rail || j.chain) return j;
+  if(j.rail) return j;
   const ev = activeEvent(); if(!ev || Math.random() > EVENT_SHARE) return j;
   if(!["general","parcels","pallets","furniture"].includes(j.cargo)) return j;
   const it = pick(ev.items);
@@ -811,7 +785,7 @@ function drawJobs(){
   for(const j of S.jobs){
     if(j.locked) continue;
     let m = jobMarkers.get(j.id);
-    const cls = `mk-pin ${jobStatus(j).can?"":"cant"} ${j.id===selectedJob?"sel":""} ${j.event?"ev":""} ${j.rail?"rail":""} ${j.chain&&!j.rail?"chain":""}`;
+    const cls = `mk-pin ${jobStatus(j).can?"":"cant"} ${j.id===selectedJob?"sel":""} ${j.event?"ev":""} ${j.rail?"rail":""}`;
     if(!m){
       m = L.marker([j.from.lat,j.from.lon], {icon:L.divIcon({className:"", html:`<div class="${cls}">${PIN_SVG}</div>`, iconSize:[22,28], iconAnchor:[11,27]}), title:`${CARGO[j.cargo].n} · ${money(j.pay)}`});
       m.on("click", e=>{ L.DomEvent.stopPropagation(e); selectJob(j.id); });
@@ -913,7 +887,6 @@ $("#zArea").onclick=()=>{ if(S){ const b=L.latLngBounds(S.bases.map(x=>{const p=
 
 /* ---------------- Panel ---------------- */
 function evChip(j){ return `<span class="chip evchip" style="--ev:${j.evColor||"#7b3fb5"}"><i></i>${esc(j.item||"Event load")} · +25%</span>`; }
-function chainChip(j){ return `<span class="chip chainchip"><i></i>Intermodal · leg ${j.chain.leg} of 3${j.chain.leg===2?" · train":" · truck"}</span>`; }
 function cargoChip(c){ return `<span class="chip" style="color:var(--c-${c})"><i></i><span style="color:var(--ink)">${esc(CARGO[c].n)}</span></span>`; }
 function urgTag(u){ return u==="standard"?"":`<span class="urg ${u}">${u}</span>`; }
 const MENU_PAGES = {shop:"Shop", crew:"Crew", tasks:"Tasks", log:"Log", company:"Company"};
@@ -942,7 +915,7 @@ function goals(){
 function jobCard(j){
   const st = jobStatus(j), local = j.from.c===j.to.c;
   return `<button class="card ${j.id===selectedJob?"sel":""} ${st.can?"":"dim"}" data-act="sel" data-id="${j.id}">
-    <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${j.chain?chainChip(j):""}${j.rail&&!j.chain?`<span class="chip railchip"><i></i>Rail</span>`:""}${j.event?evChip(j):""}${cargoChip(j.cargo)}${urgTag(j.urg)}</div><span class="pay">${money(j.pay)}</span></div>
+    <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${j.rail?`<span class="chip railchip"><i></i>Rail</span>`:""}${j.event?evChip(j):""}${cargoChip(j.cargo)}${urgTag(j.urg)}</div><span class="pay">${money(j.pay)}</span></div>
     <div class="route"><b>${esc(j.from.name||j.from.biz)}</b> <span class="arrow">→</span> <b>${esc(j.to.name||j.to.biz)}</b><br><span class="hint">${esc(addrLine(j.from))} → ${esc(addrLine(j.to))}</span></div>
     <div class="meta"><span class="num">${weightStr(j)}</span><span class="num">${j.routed?"":"about "}${j.miles} mi</span>${j.expires?`<span>expires in <span class="num" data-exp="${j.expires}">${dur(j.expires-S.clock)}</span></span>`:""}</div>
     ${st.can?`<span class="ok">${esc(st.opts[0].v.n)} · ${st.opts[0].r.plan.adding?"add to its trip · ":""}delivers in ${dur(st.opts[0].r.plan.deliverIn)}</span>`:`<span class="need">${esc(st.why)}</span>`}
@@ -968,34 +941,32 @@ function dispatchCard(j){
     opts = `<p class="need" style="font-size:13px;margin:0">${esc(st.why)}</p><div class="btnrow"><button class="btn ghost" data-act="unsel">Close</button>${st.soon?"":`<button class="btn ghost" data-act="tab" data-tab="shop">Open shop</button>`}</div>`;
   }
   return `<section class="dispatch" aria-label="Dispatch job">
-    <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${j.chain?chainChip(j):""}${j.rail&&!j.chain?`<span class="chip railchip"><i></i>Rail</span>`:""}${j.event?evChip(j):""}${cargoChip(j.cargo)}${urgTag(j.urg)}</div><span class="pay" style="font-size:18px">${money(j.pay)}</span></div>
+    <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${j.rail?`<span class="chip railchip"><i></i>Rail</span>`:""}${j.event?evChip(j):""}${cargoChip(j.cargo)}${urgTag(j.urg)}</div><span class="pay" style="font-size:18px">${money(j.pay)}</span></div>
     <div class="leg"><span class="dot"></span><span><b>${esc(j.from.name||j.from.biz)}</b> · ${esc(j.from.biz)}<br><span class="hint">${esc(addrLine(j.from))}</span></span>
       <span class="line"></span><span class="hint"><span class="num">${weightStr(j)}</span> · <span class="num">${j.miles} mi</span> ${j.routing?(j.rail?"· checking track":"· checking roads"):j.path?(j.rail?"by rail":"by road"):"(estimate)"}</span>
       <span class="dot end"></span><span><b>${esc(j.to.name||j.to.biz)}</b> · ${esc(j.to.biz)}<br><span class="hint">${esc(addrLine(j.to))}</span></span></div>
     ${payBreakdown(j)}
-    ${j.chain?`<p class="hint" style="margin:0">Part of an intermodal chain: truck to ${esc(j.chain.leg===1?j.to.name:"the rail yard")}, train between yards, truck to the customer. Finishing all three legs adds ${CHAIN_BONUS*100}% of their pay.</p>`:""}
     <div class="btnrow"><button class="btn ghost sm" data-act="fly" data-id="${j.id}">Show route on map</button></div>
     ${opts}
   </section>`;
 }
 function renderJobs(mode="truck"){
   const rail = mode==="rail";
-  if(rail && level() < RAIL_LVL) return `<section class="sec"><h2>Train jobs</h2><div class="card dim"><div class="row"><b>Trains unlock at level ${RAIL_LVL}</b><span class="lock">Level ${RAIL_LVL}</span></div><p class="hint">Run trains between real freight yards on real track, and hand containers to your trucks at each end. You are level ${level()}.</p></div></section>`;
+  if(rail && level() < RAIL_LVL) return `<section class="sec"><h2>Train jobs</h2><div class="card dim"><div class="row"><b>Trains unlock at level ${RAIL_LVL}</b><span class="lock">Level ${RAIL_LVL}</span></div><p class="hint">Run trains between real freight yards on real track. You are level ${level()}.</p></div></section>`;
   const sj = S.jobs.find(j=>j.id===selectedJob && !!j.rail===rail);
   const list = S.jobs.filter(j=>!!j.rail===rail).map(j=>({j,can:jobStatus(j).can})).sort((a,b)=>(b.can-a.can)||(b.j.pay-a.j.pay));
-  const can = list.filter(x=>x.can), cant = list.filter(x=>!x.can && !x.j.locked), waiting = list.filter(x=>x.j.locked);
+  const can = list.filter(x=>x.can), cant = list.filter(x=>!x.can);
   let h = "";
   if(sj) h += dispatchCard(sj);
   if(rail){
     const trains = S.vehicles.filter(isTrain);
     if(!trains.length) h += `<p class="hint" style="color:var(--ink)">You have no trains yet. Buy a locomotive in <b>Menu → Shop</b>, add railcars in the <b>Fleet</b> tab, and hire an engineer in <b>Menu → Crew</b>.</p>`;
-    h += `<p class="hint">Rail jobs run between real freight yards (square markers on the map). Intermodal legs 1 and 3 are truck jobs on the Truck jobs tab.</p>`;
+    h += `<p class="hint">Rail jobs run between real freight yards (square markers on the map).</p>`;
   }
   if(!rail && S.jobsDone<1 && !sj) h += `<p class="hint" style="color:var(--ink)">Tap an orange pin on the map, or pick a job below, then send your van. Gray pins need a vehicle you do not own yet.</p>`;
   if(!rail) h += `<p class="hint">Board: ${boardCount()} of ${maxJobs()} jobs. A new one posts every ${JOB_EVERY_MS/1000} seconds.</p>`;
   h += `<section class="sec"><div class="sec-head"><h2>Ready to run</h2><span class="hint num">${can.length}</span></div>${can.length?`<div class="list">${can.map(x=>jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. ${rail?"A new rail job posts as soon as a train is free.":"A new job posts every 30 seconds."}</p>`}</section>`;
   if(cant.length) h += `<section class="sec"><div class="sec-head"><h2>Other jobs nearby</h2><span class="hint num">${cant.length}</span></div><div class="list">${cant.map(x=>jobCard(x.j)).join("")}</div></section>`;
-  if(waiting.length) h += `<section class="sec"><div class="sec-head"><h2>Next intermodal legs</h2><span class="hint num">${waiting.length}</span></div><p class="hint">Each opens when the leg before it is delivered. Finish all three for a ${CHAIN_BONUS*100}% bonus.</p><div class="list">${waiting.map(x=>jobCard(x.j)).join("")}</div></section>`;
   return h;
 }
 function renderAir(){
@@ -1075,7 +1046,7 @@ function yardOptions(){
     .map(({y,d})=>`<option value="${y.id}">${esc(y.n)}, ${esc(y.city)} ${y.s} · ${d} mi from your nearest hub</option>`).join("");
 }
 function renderTrainShop(L_){
-  if(L_ < RAIL_LVL) return `<div class="card dim"><div class="row"><b>Trains</b><span class="lock">Level ${RAIL_LVL}</span></div><p class="hint">Run trains between real freight yards and hand containers to your trucks at each end.</p></div>`;
+  if(L_ < RAIL_LVL) return `<div class="card dim"><div class="row"><b>Trains</b><span class="lock">Level ${RAIL_LVL}</span></div><p class="hint">Run trains between real freight yards on real track.</p></div>`;
   const yo = yardOptions();
   return `<p class="hint">Trains run between real freight yards on real track. Each train needs a locomotive, railcars for the cargo, and an engineer (Menu → Crew). Add railcars from the train's card in the Fleet tab.</p>
     ${LOCOS.map(l=>{ const locked = l.lvl>L_, poor = S.cash<l.price;
@@ -1418,8 +1389,8 @@ function start(){
   try{ const raw = localStorage.getItem(KEY); if(raw) loaded = JSON.parse(raw); }catch(_){}
   if(loaded && loaded.v===2){
     S = loaded;
-    S.chains ||= {};
-    { const live = new Set(S.jobs.filter(j=>j.chain).map(j=>j.chain.id).concat((S.trips||[]).flatMap(t=>(t.loads||[]).filter(l=>l.job.chain).map(l=>l.job.chain.id)))); for(const k in S.chains) if(!live.has(k)) delete S.chains[k]; }
+    S.jobs = S.jobs.filter(j=>!j.chain); delete S.chains;
+    (S.trips||[]).forEach(t=>(t.loads||[]).forEach(l=>{ delete l.job.chain; }));
     S.trips = S.trips.map(migrateTrip); S.trips.forEach(pruneLoads); S.vehicles.forEach(v=>{ delete v.ret; v.busy = !!tripOf(v); });
     S.bases.forEach((b,i)=>{ if(b.tier==null) b.tier=0; delete b.slots; if(!b.name) b.name = b.home ? "HQ" : `Hub ${i+1}`; });
     S.jobs = S.jobs.filter(fitsUnlocked);

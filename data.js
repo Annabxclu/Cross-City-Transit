@@ -199,7 +199,6 @@ const RAIL_YARDS = [
 const YARD = Object.fromEntries(RAIL_YARDS.map(y=>[y.id,y]));
 const RAIL_LVL = 15;
 const RAIL_PAY = 0.5;            // rail pays less per pound-mile, but trains carry a lot
-const CHAIN_BONUS = 0.25;        // extra on top of all three legs when an intermodal chain is finished
 const CONTAINER_LB = 40000;
 const MAX_RAIL_DEADHEAD = 600;   // a train can run empty this far to reach a pickup yard
 const ENGINEER = {n:"Engineer", fee:20000, lvl:RAIL_LVL};
