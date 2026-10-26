@@ -205,42 +205,91 @@ function handleMs(j){ // loading or unloading time for this load
   const m = j.cargo==="vehicles" ? LOAD_BASE_MIN + LOAD_MIN_PER_CAR*j.weight : LOAD_BASE_MIN + LOAD_MIN_PER_1000LB*j.weight/1000;
   return m*MIN;
 }
-// A vehicle that has delivered and is heading home can take a new job from wherever it is.
-const returnTrip = v => v.ret ? S.trips.find(tr=>tr.id===v.ret) : null;
-function startPt(v){
-  const tr = returnTrip(v);
-  if(tr){ const ll = posOf(tr, S.clock).ll; return {lat:ll[0], lon:ll[1]}; }
-  return basePt(baseById(v.base));
+/* ---------------- Trips with several loads ----------------
+   A trip is an ordered run of drives and stops (pickups and drop-offs) that ends back at the hub.
+   While a vehicle has room, more loads can be added; the stops not yet reached are re-planned. */
+const MAX_LOADS = 8;
+const tripOf = v => S.trips.find(tr=>tr.v===v.id);
+const llPt = ll => ({lat:ll[0], lon:ll[1]});
+const openLoads = tr => tr ? tr.loads.filter(l=>!l.delivered) : [];
+const usedRoom = tr => openLoads(tr).reduce((n,l)=>n+l.job.weight, 0);
+const roomStr = (t, n) => t.cars ? `${n} of ${t.cap} cars` : `${n.toLocaleString("en-US")} of ${t.cap.toLocaleString("en-US")} lb`;
+const legMs = (mi, loaded, slow) => loaded ? driveMs(mi, slow, 1) : Math.max(0.2*MIN, mi/30/2*MIN);
+
+// Builds the stops and drives for a vehicle from time t, optionally with one more job. Changes nothing.
+function planRoute(v, tr, extra, t){
+  const type = TYPE[v.type], hub = basePt(baseById(v.base));
+  const loads = (tr ? tr.loads.map(l=>({...l})) : []);
+  if(extra) loads.push({job:extra, picked:false, delivered:false});
+  let pos = hub, t0 = t, kept = [];
+  if(tr){
+    const s = segAt(tr, t);
+    if(s.kind==="stop" && t < s.t1){ kept = [s]; pos = llPt(s.path[0]); t0 = s.t1;
+      const ld = loads.find(l=>l.job.id===s.jid); if(ld){ if(s.sk==="pick") ld.picked = true; else ld.delivered = true; } }
+    else pos = llPt(posOf(tr, t).ll);
+  }
+  const pending = [];
+  loads.forEach(l=>{ if(!l.picked) pending.push({sk:"pick", l}); if(!l.delivered) pending.push({sk:"drop", l}); });
+  const onboard = new Set(loads.filter(l=>l.picked && !l.delivered).map(l=>l.job.id));
+  const picked = new Set(loads.filter(l=>l.picked).map(l=>l.job.id));
+  const segs = [...kept]; let cur = pos, tt = t0, prev = null, deadToExtra = null;
+  while(pending.length){
+    const avail = pending.filter(p=>p.sk==="pick" || picked.has(p.l.job.id));
+    avail.sort((a,b)=>estMi(cur, a.sk==="pick"?a.l.job.from:a.l.job.to) - estMi(cur, b.sk==="pick"?b.l.job.from:b.l.job.to));
+    const nx = avail[0]; pending.splice(pending.indexOf(nx),1);
+    const j = nx.l.job, pt = nx.sk==="pick" ? j.from : j.to;
+    const direct = prev && prev.sk==="pick" && nx.sk==="drop" && prev.l===nx.l;   // straight from its own pickup
+    const mi = direct ? j.miles : estMi(cur, pt);
+    if(mi >= 0.05){
+      const loaded = onboard.size>0, ms = legMs(mi, loaded, type.slow);
+      segs.push({kind:"drive", ph:loaded?"haul":"dead", path: direct && j.path ? j.path : straight(cur, pt), t0:tt, t1:tt+ms, mi, next:{sk:nx.sk, jid:j.id}});
+      tt += ms;
+    }
+    if(extra && nx.sk==="pick" && j.id===extra.id) deadToExtra = direct ? 0 : mi;
+    const hm = handleMs(j);
+    segs.push({kind:"stop", ph:"load", sk:nx.sk, jid:j.id, path:[[pt.lat,pt.lon]], t0:tt, t1:tt+hm});
+    tt += hm;
+    if(nx.sk==="pick"){ picked.add(j.id); onboard.add(j.id); } else onboard.delete(j.id);
+    cur = pt; prev = nx;
+  }
+  const back = estMi(cur, hub);
+  if(back >= 0.05){ const ms = legMs(back, false, type.slow); segs.push({kind:"drive", ph:"ret", path:straight(cur, hub), t0:tt, t1:tt+ms, mi:back}); tt += ms; }
+  else segs.push({kind:"drive", ph:"ret", path:[[hub.lat,hub.lon]], t0:tt, t1:tt+0.2*MIN, mi:0}), tt += 0.2*MIN;
+  const dropOf = id => segs.find(s=>s.kind==="stop" && s.sk==="drop" && s.jid===id);
+  return {segs, endAt:tt, loads, dropOf, deadToExtra, pos};
 }
-function planTrip(v, j, drivers){
-  const t = TYPE[v.type], bp = basePt(baseById(v.base)), sp = startPt(v);
-  const dead = estMi(sp, j.from), back = estMi(j.to, bp);
-  const f = 1;   // no driver speed levels
-  const ld = handleMs(j), lu = handleMs(j);
-  const tDead = Math.max(0.2*MIN, dead/30/2*MIN*f), tHaul = driveMs(j.miles, t.slow, f), tBack = Math.max(0.2*MIN, back/30/2*MIN*f);
-  const cut = 0;  // drivers take no cut of the pay
-  return {dead, back, tDead, ld, lu, tHaul, tBack, total:tDead+ld+tHaul+lu+tBack, deliverIn:tDead+ld+tHaul+lu, cut, bonus:1};
+// A short summary of what sending this vehicle on job j would look like (used by the dispatch card).
+function planTrip(v, j){
+  const tr = tripOf(v), r = planRoute(v, tr, j, S.clock), now = S.clock;
+  const segs = r.segs, pk = segs.find(s=>s.kind==="stop" && s.sk==="pick" && s.jid===j.id), dr = r.dropOf(j.id);
+  const haul = segs.find(s=>s.kind==="drive" && s.next?.jid===j.id && s.next.sk==="drop");
+  return {adding:!!tr, dead:Math.round(r.deadToExtra||0), tDead: pk ? Math.max(0, pk.t0-now) : 0,
+    ld: pk ? pk.t1-pk.t0 : 0, lu: dr ? dr.t1-dr.t0 : 0, tHaul: haul ? haul.t1-haul.t0 : 0,
+    deliverIn: dr ? dr.t1-now : 0, total: r.endAt-now, extra: tr ? r.endAt - tr.endAt : 0,
+    loads: openLoads(tr).length + 1, cut:0, bonus:1};
 }
 function vehicleFor(v, j){
   const t = TYPE[v.type];
   if(!t.cargo.includes(j.cargo)) return {ok:false, why:"Wrong trailer"};
   if(j.weight > t.cap) return {ok:false, why:"Too heavy"};
   if(j.miles > t.leg) return {ok:false, why:`Over ${t.leg} mi range`};
-  if(v.busy) return {ok:false, why:"On a job", busy:true};
-  if(estMi(startPt(v), j.from) > MAX_DEADHEAD) return {ok:false, why:`Over ${MAX_DEADHEAD} mi from the pickup`};
-  const rt = returnTrip(v);
-  let ds;
-  if(rt){ // keep the crew that is already in the cab
-    const crew = rt.drivers.map(id=>S.drivers.find(d=>d.id===id)).filter(Boolean);
-    const okLic = t.lic==="std" || crew.every(d=>d.kind==="cdl" && (j.cargo!=="hazmat"||d.hazmat));
-    ds = okLic ? crew : null;
-  } else ds = freeDrivers(t.lic, j.cargo);
+  const tr = tripOf(v);
+  let ds, from;
+  if(tr){
+    const used = usedRoom(tr);
+    if(used + j.weight > t.cap) return {ok:false, why: used>=t.cap ? `Full (${roomStr(t, used)})` : `Not enough room (${roomStr(t, used)} used)`, busy:true};
+    if(openLoads(tr).length >= MAX_LOADS) return {ok:false, why:`Already carrying ${MAX_LOADS} loads`, busy:true};
+    const crew = tr.drivers.map(id=>S.drivers.find(d=>d.id===id)).filter(Boolean);
+    ds = (t.lic==="std" || crew.every(d=>d.kind==="cdl" && (j.cargo!=="hazmat"||d.hazmat))) ? crew : null;
+    from = llPt(posOf(tr, S.clock).ll);
+  } else { ds = freeDrivers(t.lic, j.cargo); from = basePt(baseById(v.base)); }
+  if(estMi(from, j.from) > MAX_DEADHEAD) return {ok:false, why:`Over ${MAX_DEADHEAD} mi from the pickup`};
   if(!ds) return {ok:false, why: t.lic==="std"?"No free driver": j.cargo==="hazmat"?"Needs hazmat driver": t.lic==="cdl2"?"Needs 2 free CDL drivers":"No free CDL driver", nodriver:true};
-  return {ok:true, drivers:ds, plan:planTrip(v,j,ds)};
+  return {ok:true, drivers:ds, plan:planTrip(v,j)};
 }
 function jobStatus(j){
   const opts = S.vehicles.map(v=>({v, r:vehicleFor(v,j)}));
-  const ok = opts.filter(o=>o.r.ok).sort((a,b)=>a.r.plan.total-b.r.plan.total);
+  const ok = opts.filter(o=>o.r.ok).sort((a,b)=>a.r.plan.deliverIn-b.r.plan.deliverIn);
   if(ok.length) return {can:true, opts:ok};
   const capable = opts.filter(o=>o.r.busy||o.r.nodriver);
   if(capable.length) return {can:false, soon:true, why: capable.some(o=>o.r.busy) ? "Your matching vehicles are busy" : capable[0].r.why};
@@ -249,63 +298,70 @@ function jobStatus(j){
 }
 
 /* ---------------- Dispatch & simulation ---------------- */
-function mkSeg(ph, path, t0, t1){ return {ph, path, t0, t1}; }
+function addMiles(v, mi){ if(v && mi) v.miles = (v.miles||0) + mi; }
 function dispatch(j, v, viaDispatcher){
   const r = vehicleFor(v,j); if(!r.ok) return false;
-  const rt = returnTrip(v), A = startPt(v);
-  if(rt){ const ret=rt.segs[4]; v.miles=(v.miles||0)+(rt.retMi||0)*Math.min(1,Math.max(0,(S.clock-ret.t0)/((ret.t1-ret.t0)||1))); S.trips = S.trips.filter(x=>x!==rt); v.ret = null; }
-  const p = r.plan, base = baseById(v.base), B = basePt(base), O = {lat:j.from.lat,lon:j.from.lon}, D = {lat:j.to.lat,lon:j.to.lon};
-  const t0 = S.clock, a = t0+p.tDead, b = a+p.ld, c = b+p.tHaul, d = c+p.lu, e = d+p.tBack;
-  const trip = {id:nid("t"), v:v.id, drivers:r.drivers.map(x=>x.id), job:{...j, path:undefined},
-    segs:[ mkSeg("dead",straight(A,O),t0,a), mkSeg("load",[[O.lat,O.lon]],a,b), mkSeg("haul", j.path||straight(O,D), b,c),
-           mkSeg("load",[[D.lat,D.lon]],c,d), mkSeg("ret",straight(D,B),d,e) ],
-    deadMi:p.dead, haulMi:j.miles, retMi:p.back, deliverAt:d, endAt:e, gross:Math.round(j.pay*p.bonus), cut:p.cut+(viaDispatcher?0.05:0), delivered:false, auto:!!viaDispatcher};
-  S.trips.push(trip);
+  let tr = tripOf(v);
+  const rp = planRoute(v, tr, j, S.clock);
+  if(tr){
+    // credit the part of the current drive already covered before re-planning the rest
+    const s = segAt(tr, S.clock);
+    if(s.kind==="drive" && !s.done && S.clock > s.t0) addMiles(v, (s.mi||0) * Math.min(1, (S.clock-s.t0)/((s.t1-s.t0)||1)));
+  } else {
+    tr = {id:nid("t"), v:v.id, drivers:r.drivers.map(x=>x.id), loads:[], startAt:S.clock};
+    S.trips.push(tr); r.drivers.forEach(x=>x.busy=true);
+  }
+  tr.loads.push({job:{...j}, picked:false, delivered:false, cut: viaDispatcher?0.05:0});
+  tr.segs = rp.segs; tr.endAt = rp.endAt;
+  v.busy = true;
   recordDispatch(viaDispatcher);
-  v.busy = true; r.drivers.forEach(x=>x.busy=true);
   S.jobs = S.jobs.filter(x=>x.id!==j.id);
-  if(!simulating) roadTrip(trip);
-  return trip;
+  if(!simulating) roadTrip(tr);
+  return tr;
 }
-// Swap straight placeholder lines for real road geometry (timing stays as quoted).
+// Swap straight placeholder lines for real road geometry (timing stays as planned).
 function roadTrip(tr){
-  const legs = [[0,"dead"],[2,"haul"],[4,"ret"]];
-  for(const [i] of legs){
-    const s = tr.segs[i]; if(s.path.length>2) continue;
-    if(S.clock > s.t1) continue;
-    const a = {lat:s.path[0][0],lon:s.path[0][1]}, b = {lat:s.path.at(-1)[0],lon:s.path.at(-1)[1]};
+  for(const s of tr.segs){
+    if(s.kind!=="drive" || s.done || s.path.length!==2 || S.clock > s.t1) continue;
+    const a = llPt(s.path[0]), b = llPt(s.path[1]);
     if(estMi(a,b)<0.3) continue;
-    getRoute(a,b).then(r=>{ if(r && S && S.trips.includes(tr)){ s.path = r.path; s.cum = null; tripLines.get(tr.id)?.setLatLngs([]); } });
+    getRoute(a,b).then(r=>{ if(r && S && S.trips.includes(tr) && tr.segs.includes(s)){ s.path = r.path; s.cum = null; tripLines.get(tr.id)?.setLatLngs([]); } });
   }
 }
 let awayLog = null, simulating = false, simT = 0;
 const simWhen = () => awayLog ? awayLog.start + simT : Date.now();
-function deliver(tr){
-  tr.delivered = true;
-  const net = tr.gross*(1-tr.cut)*S.payMult;
+function deliverLoad(tr, ld){
+  ld.delivered = true;
+  const j = ld.job, gross = j.pay, net = gross*(1-(ld.cut||0))*S.payMult;
   const before = level();
-  S.cash += net; S.earned += net; S.xp += tr.gross/100; S.jobsDone++;
-  recordDelivery(tr, net);
-  const v = S.vehicles.find(x=>x.id===tr.v); if(v){ v.jobs++; v.miles=(v.miles||0)+(tr.deadMi||0)+(tr.haulMi||tr.job.miles||0); }
+  S.cash += net; S.earned += net; S.xp += gross/100; S.jobsDone++;
+  recordDelivery({job:j, haulMi:j.miles}, net);
+  const v = S.vehicles.find(x=>x.id===tr.v); if(v) v.jobs++;
   tr.drivers.forEach(id=>{const d=S.drivers.find(x=>x.id===id); if(d){d.jobs++;}});
-  if(awayLog){awayLog.jobs++; awayLog.net+=net; logEvent(`<b>${esc(v?v.n:"Truck")}</b> delivered ${esc(CARGO[tr.job.cargo].n.toLowerCase())} to ${esc(tr.job.to.name||cityName(tr.job.to.c))} <span class="num">+${money(net)}</span> (while you were away)`, simWhen());}
-  else toast(`<b>${esc(v?v.n:"Truck")}</b> delivered ${esc(CARGO[tr.job.cargo].n.toLowerCase())} to ${esc(tr.job.to.name||tr.job.to.biz)}, ${esc(cityName(tr.job.to.c))} <span class="num">+${money(net)}</span>`);
+  const what = j.event ? esc(j.item.toLowerCase()) : esc(CARGO[j.cargo].n.toLowerCase());
+  if(awayLog){awayLog.jobs++; awayLog.net+=net; logEvent(`<b>${esc(v?v.n:"Truck")}</b> delivered ${what} to ${esc(j.to.name||cityName(j.to.c))} <span class="num">+${money(net)}</span> (while you were away)`, simWhen());}
+  else toast(`<b>${esc(v?v.n:"Truck")}</b> delivered ${what} to ${esc(j.to.name||j.to.biz)}, ${esc(cityName(j.to.c))} <span class="num">+${money(net)}</span>`);
   const after = level();
   for(let L=before+1;L<=after;L++){ if(awayLog){ awayLog.levels.push(L); logEvent(`<b>Level ${L}</b>${UNLOCKS[L]?` · unlocked ${esc(UNLOCKS[L])}`:""}`, simWhen()); } else toast(`<b>Level ${L}</b>${UNLOCKS[L]?` · unlocked ${esc(UNLOCKS[L])}`:""}`, 6000); }
 }
 function logic(){
   let changed = false;
   for(const tr of S.trips){
-    if(!tr.pickedUp && S.clock>=tr.segs[1].t1){
-      tr.pickedUp = true; changed = true;
-      const v = S.vehicles.find(x=>x.id===tr.v);
-      if(!awayLog) toast(`<b>${esc(v?v.n:"Truck")}</b> picked up ${esc(weightStr(tr.job))} of ${esc(CARGO[tr.job.cargo].n.toLowerCase())} at ${esc(tr.job.from.name||tr.job.from.biz)}`);
+    const v = S.vehicles.find(x=>x.id===tr.v);
+    for(const sg of tr.segs){
+      if(sg.done || S.clock < sg.t1) continue;
+      sg.done = true; changed = true;
+      if(sg.kind==="drive"){ addMiles(v, sg.mi); continue; }
+      const ld = tr.loads.find(l=>l.job.id===sg.jid); if(!ld) continue;
+      if(sg.sk==="pick" && !ld.picked){
+        ld.picked = true;
+        if(!awayLog) toast(`<b>${esc(v?v.n:"Truck")}</b> picked up ${esc(weightStr(ld.job))} of ${esc(ld.job.event?ld.job.item.toLowerCase():CARGO[ld.job.cargo].n.toLowerCase())} at ${esc(ld.job.from.name||ld.job.from.biz)}`);
+      } else if(sg.sk==="drop" && !ld.delivered) deliverLoad(tr, ld);
     }
-    if(!tr.delivered && S.clock>=tr.deliverAt){ deliver(tr); const v=S.vehicles.find(x=>x.id===tr.v); if(v){ v.busy=false; v.ret=tr.id; } changed=true; }
   }
   const done = S.trips.filter(tr=>S.clock>=tr.endAt);
   if(done.length){
-    done.forEach(tr=>{const v=S.vehicles.find(x=>x.id===tr.v); if(v){ v.busy=false; if(v.ret===tr.id||!v.ret) v.miles=(v.miles||0)+(tr.retMi||0); if(v.ret===tr.id) v.ret=null; } tr.drivers.forEach(id=>{const d=S.drivers.find(x=>x.id===id); if(d)d.busy=false;});});
+    done.forEach(tr=>{ const v=S.vehicles.find(x=>x.id===tr.v); if(v) v.busy=false; tr.drivers.forEach(id=>{const d=S.drivers.find(x=>x.id===id); if(d)d.busy=false;}); });
     S.trips = S.trips.filter(tr=>S.clock<tr.endAt); changed = true;
   }
   const n0 = S.jobs.length;
@@ -320,7 +376,7 @@ function logic(){
   }
   for(const b of S.bases){
     if(!b.dispatcher) continue;
-    for(const v of S.vehicles.filter(x=>x.base===b.id && !x.busy)){
+    for(const v of S.vehicles.filter(x=>x.base===b.id && (!tripOf(x) || !openLoads(tripOf(x)).length))){
       const best = S.jobs.filter(j=>estMi(basePt(b),j.from)<=RADIUS_MI*1.3 && vehicleFor(v,j).ok).sort((a,c)=>c.pay-a.pay)[0];
       if(best){ dispatch(best, v, true); changed = true; }
     }
@@ -366,7 +422,7 @@ Object.assign(NAME_SUFFIX, {
   "Costume Warehouse":["Costume Warehouse","Costume Supply"], "Decoration Supplier":["Seasonal Decor","Party Supply"],
   "Hay Farm":["Hay Farm","Hay & Feed"], "Cider Mill":["Cider Mill","Orchard Cider"],
   "Grocery Store":["Market","Grocery","Fresh Market"], "Fall Festival":["Fall Festival","Harvest Fest"],
-  "Farmers Market":["Farmers Market"], "Party Store":["Party Store","Party City Outlet"],
+  "Farmers Market":["Farmers Market"], "Party Store":["Party Store","Party Outlet"],
   "Trunk-or-Treat Lot":["Church Trunk-or-Treat","Community Trunk-or-Treat"], "Costume Shop":["Costume Shop","Costumes"],
   "Theater":["Playhouse","Community Theater"], "Haunted House":["Haunted House","Scream Park","Haunted Manor"],
   "Corn Maze":["Corn Maze","Maze & Hayride"]
@@ -682,20 +738,22 @@ function frame(){
     for(const [id,m] of vehMarkers) if(!live.has(id)){ layerVeh.removeLayer(m); vehMarkers.delete(id); }
     for(const [id,l] of tripLines) if(!live.has(id)){ layerRoutes.removeLayer(l); tripLines.delete(id); }
     // Pickup and drop-off markers for every load on the road
-    for(const tr of S.trips){
-      let sm = stopMarkers.get(tr.id);
+    const liveStops = new Set();
+    for(const tr of S.trips) for(const ld of tr.loads){
+      const j = ld.job, k = tr.id+"|"+j.id;
+      let sm = stopMarkers.get(k);
       if(!sm){
-        const j = tr.job;
         sm = {
           pick: L.marker([j.from.lat,j.from.lon], {icon:L.divIcon({className:"", html:'<div class="mk-stop pick">P</div>', iconSize:[20,20], iconAnchor:[10,10]}), title:`Pickup: ${j.from.name||j.from.biz}`, zIndexOffset:600}).addTo(layerStops),
           drop: L.marker([j.to.lat,j.to.lon], {icon:L.divIcon({className:"", html:'<div class="mk-stop drop">D</div>', iconSize:[20,20], iconAnchor:[10,10]}), title:`Drop-off: ${j.to.name||j.to.biz}`, zIndexOffset:600}).addTo(layerStops)
         };
-        stopMarkers.set(tr.id, sm);
+        stopMarkers.set(k, sm);
       }
-      if(t>=tr.segs[1].t1 && sm.pick){ layerStops.removeLayer(sm.pick); sm.pick=null; }
-      if(t>=tr.deliverAt && sm.drop){ layerStops.removeLayer(sm.drop); sm.drop=null; }
+      if(ld.picked && sm.pick){ layerStops.removeLayer(sm.pick); sm.pick=null; }
+      if(ld.delivered && sm.drop){ layerStops.removeLayer(sm.drop); sm.drop=null; }
+      liveStops.add(k);
     }
-    for(const [id,sm] of stopMarkers) if(!live.has(id)){ if(sm.pick) layerStops.removeLayer(sm.pick); if(sm.drop) layerStops.removeLayer(sm.drop); stopMarkers.delete(id); }
+    for(const [k,sm] of stopMarkers) if(!liveStops.has(k)){ if(sm.pick) layerStops.removeLayer(sm.pick); if(sm.drop) layerStops.removeLayer(sm.drop); stopMarkers.delete(k); }
   }
   requestAnimationFrame(frame);
 }
@@ -728,7 +786,7 @@ function jobCard(j){
     <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${j.event?evChip(j):""}${cargoChip(j.cargo)}${urgTag(j.urg)}</div><span class="pay">${money(j.pay)}</span></div>
     <div class="route"><b>${esc(j.from.name||j.from.biz)}</b> <span class="arrow">→</span> <b>${esc(j.to.name||j.to.biz)}</b><br><span class="hint">${esc(addrLine(j.from))} → ${esc(addrLine(j.to))}</span></div>
     <div class="meta"><span class="num">${weightStr(j)}</span><span class="num">${j.routed?"":"about "}${j.miles} mi</span>${j.expires?`<span>expires in <span class="num" data-exp="${j.expires}">${dur(j.expires-S.clock)}</span></span>`:""}</div>
-    ${st.can?`<span class="ok">${esc(st.opts[0].v.n)} · back in ${dur(st.opts[0].r.plan.total)}</span>`:`<span class="need">${esc(st.why)}</span>`}
+    ${st.can?`<span class="ok">${esc(st.opts[0].v.n)} · ${st.opts[0].r.plan.adding?"add to its trip · ":""}delivers in ${dur(st.opts[0].r.plan.deliverIn)}</span>`:`<span class="need">${esc(st.why)}</span>`}
   </button>`;
 }
 function payBreakdown(j){
@@ -744,7 +802,7 @@ function dispatchCard(j){
     if(!chosenVeh || !st.opts.find(o=>o.v.id===chosenVeh)) chosenVeh = st.opts[0].v.id;
     opts = `<div class="opts">${st.opts.map(o=>{const p=o.r.plan;const net=Math.round(j.pay*p.bonus*(1-p.cut));
       return `<label class="opt"><input type="radio" name="veh" value="${o.v.id}" ${o.v.id===chosenVeh?"checked":""}>
-      <span><b>${esc(o.v.n)}</b> · ${esc(TYPE[o.v.type].n)}<small>${esc(o.r.drivers.map(d=>d.name).join(" + "))} · ${p.dead>1?`${p.dead} mi to pickup (${dur(p.tDead)}) · `:""}loading ${dur(p.ld)} · drive ${dur(p.tHaul)} · unloading ${dur(p.lu)}<br>Delivers in ${dur(p.deliverIn)}, back at the hub in ${dur(p.total)}</small></span>
+      <span><b>${esc(o.v.n)}</b> · ${esc(TYPE[o.v.type].n)}<small>${esc(o.r.drivers.map(d=>d.name).join(" + "))} · ${p.adding?`<b>Adds to its current trip</b> (${p.loads} loads, ${roomStr(TYPE[o.v.type], usedRoom(tripOf(o.v))+j.weight)}) · `:""}${p.dead>1?`${p.dead} mi to pickup · `:""}${p.adding?"":`loading ${dur(p.ld)} · drive ${dur(p.tHaul)} · unloading ${dur(p.lu)}<br>`}Delivers this load in ${dur(p.deliverIn)}, back at the hub in ${dur(p.total)}${p.adding&&p.extra>0?` (+${dur(p.extra)})`:""}</small></span>
       <span class="pay" title="Job pay">${money(net)}</span></label>`;}).join("")}</div>
       <div class="btnrow"><button class="btn" data-act="go" data-id="${j.id}" ${j.routing?"disabled":""}>${j.routing?"Finding route…":"Dispatch"}</button><button class="btn ghost" data-act="unsel">Close</button></div>`;
   } else {
@@ -777,10 +835,15 @@ function renderJobs(){
   if(cant.length) h += `<section class="sec"><div class="sec-head"><h2>Other jobs nearby</h2><span class="hint num">${cant.length}</span></div><div class="list">${cant.map(x=>jobCard(x.j)).join("")}</div></section>`;
   return h;
 }
+function stopName(tr, sk, jid){ const j = tr.loads.find(l=>l.job.id===jid)?.job; if(!j) return ""; return sk==="pick" ? (j.from.name||j.from.biz) : (j.to.name||j.to.biz); }
 function phaseText(tr,t){
-  const p=segAt(tr,t).ph, f=tr.job.from.name||tr.job.from.biz, d=tr.job.to.name||tr.job.to.biz;
-  return p==="dead"?`Heading to pickup at ${f}`:p==="load"?(t<tr.segs[2].t0?`Loading at ${f}`:`Unloading at ${d}`):p==="haul"?`Loaded, delivering to ${d}`:"Returning to hub · ready for a new job";
+  const sg = segAt(tr,t);
+  if(sg.kind==="stop") return sg.sk==="pick" ? `Loading at ${stopName(tr,"pick",sg.jid)}` : `Unloading at ${stopName(tr,"drop",sg.jid)}`;
+  if(sg.ph==="ret") return "Returning to hub · can take more jobs";
+  const on = openLoads(tr).filter(l=>l.picked).length;
+  return sg.next?.sk==="pick" ? `${on?`${on} on board · `:""}To pickup at ${stopName(tr,"pick",sg.next.jid)}` : `${on} on board · Delivering to ${stopName(tr,"drop",sg.next?.jid)}`;
 }
+function nextStopAt(tr,t){ const sg = tr.segs.find(x=>x.kind==="stop" && !x.done && x.t1>t); return sg ? {t:sg.t0>t?sg.t0:sg.t1, label: sg.t0>t?"Next stop in":"Stop done in"} : {t:tr.endAt, label:"Back at hub in"}; }
 function renderFleet(){
   const t = displayClock();
   let h = `<section class="sec"><div class="sec-head"><h2>Your fleet</h2><span class="hint num">${S.vehicles.length} vehicles</span></div><div class="list">`;
@@ -791,12 +854,14 @@ function renderFleet(){
       const tr = S.trips.find(x=>x.v===v.id), ty = TYPE[v.type];
       const cap = ty.cars?`${ty.cap} cars`:`${ty.cap.toLocaleString("en-US")} lb`;
       if(tr){
-        const pct = Math.min(100,(t-tr.segs[0].t0)/(tr.endAt-tr.segs[0].t0)*100);
+        const pct = Math.min(100,(t-tr.startAt)/((tr.endAt-tr.startAt)||1)*100);
         const ds = tr.drivers.map(id=>S.drivers.find(d=>d.id===id)?.name).join(" + ");
-        h += `<div class="card"><div class="row"><b><span class="vic">${iconSvg(TYPE[v.type].mode,13)}</span>${esc(v.n)}</b><span class="status busy" data-ph="${tr.id}">${phaseText(tr,t)}</span></div>
-          <div class="route">${esc(cityName(tr.job.from.c))} <span class="arrow">→</span> ${esc(cityName(tr.job.to.c))} · ${esc(ds)} · <span class="num">${Math.round(v.miles||0).toLocaleString("en-US")} mi lifetime</span></div>
+        const ns = nextStopAt(tr,t), used = usedRoom(tr);
+        h += `<div class="card"><div class="row"><b><span class="vic">${iconSvg(TYPE[v.type].mode,13)}</span>${esc(v.n)}</b><span class="status busy" data-ph="${tr.id}">${esc(phaseText(tr,t))}</span></div>
+          <div class="meta"><span>${esc(ds)}</span><span class="num">${roomStr(ty, used)} loaded or booked</span><span class="num">${Math.round(v.miles||0).toLocaleString("en-US")} mi lifetime</span></div>
           <div class="prog"><i data-prog="${tr.id}" style="width:${pct}%"></i></div>
-          <div class="meta"><span>${tr.delivered?"Delivered, home in":"Delivers in"} <span class="num" data-eta="${tr.id}">${dur((tr.delivered?tr.endAt:tr.deliverAt)-t)}</span></span><span class="num">${money(tr.gross*(1-tr.cut))}</span></div>
+          <ul class="loads">${tr.loads.map(l=>`<li class="${l.delivered?"done":""}"><span>${esc(l.job.from.name||l.job.from.biz)} <span class="arrow">→</span> ${esc(l.job.to.name||l.job.to.biz)}</span><span class="num">${weightStr(l.job)}</span><span class="lst">${l.delivered?"Delivered":l.picked?"On board":"Waiting for pickup"}</span><span class="num">${money(l.job.pay*(1-(l.cut||0)))}</span></li>`).join("")}</ul>
+          <div class="meta"><span>${ns.label} <span class="num" data-eta="${tr.id}">${dur(ns.t-t)}</span></span><span>${used<ty.cap&&openLoads(tr).length<MAX_LOADS?"Room for more loads":"Full"}</span></div>
           <div class="btnrow"><button class="btn ghost sm" data-act="follow" data-id="${tr.id}">Follow on map</button><button class="btn ghost sm" data-act="askRen" data-id="${v.id}">Rename</button></div>${pendingConfirm===("ren"+v.id)?`<div class="btnrow"><input type="text" id="ren-${v.id}" maxlength="24" value="${esc(v.n)}" aria-label="New name for ${esc(v.n)}" style="flex:1;min-width:0;width:auto"><button class="btn sm" data-act="ren" data-id="${v.id}">Save</button><button class="btn ghost sm" data-act="cancel">Cancel</button></div>`:""}</div>`;
       } else {
         const confirm = pendingConfirm===("sell"+v.id);
@@ -911,8 +976,8 @@ function liveText(){
   if(!S) return;
   const t = displayClock();
   document.querySelectorAll("[data-exp]").forEach(e=>e.textContent=dur(+e.dataset.exp - S.clock));
-  document.querySelectorAll("[data-eta]").forEach(e=>{const tr=S.trips.find(x=>x.id===e.dataset.eta); if(tr) e.textContent=dur((tr.delivered?tr.endAt:tr.deliverAt)-t);});
-  document.querySelectorAll("[data-prog]").forEach(e=>{const tr=S.trips.find(x=>x.id===e.dataset.prog); if(tr) e.style.width=Math.min(100,(t-tr.segs[0].t0)/(tr.endAt-tr.segs[0].t0)*100)+"%";});
+  document.querySelectorAll("[data-eta]").forEach(e=>{const tr=S.trips.find(x=>x.id===e.dataset.eta); if(tr) e.textContent=dur(nextStopAt(tr,t).t-t);});
+  document.querySelectorAll("[data-prog]").forEach(e=>{const tr=S.trips.find(x=>x.id===e.dataset.prog); if(tr) e.style.width=Math.min(100,(t-tr.startAt)/((tr.endAt-tr.startAt)||1)*100)+"%";});
   document.querySelectorAll("[data-ph]").forEach(e=>{const tr=S.trips.find(x=>x.id===e.dataset.ph); if(tr) e.textContent=phaseText(tr,t);});
   if(following){ const tr=S.trips.find(x=>x.id===following); if(tr){ map.panTo(posOf(tr,t).ll, {animate:true, duration:.8}); } else following=null; }
 }
@@ -963,7 +1028,7 @@ $("#panelBody").addEventListener("click", e=>{
   if(a==="claimBonus"){ claimBonus(); save(); refresh(); return; }
   if(a==="claimMs"){ claimMilestone(+el.dataset.n); save(); refresh(); return; }
   if(a==="askSell"){ pendingConfirm="sell"+id; renderPanel(); return; }
-  if(a==="sell"){ const v=S.vehicles.find(x=>x.id===id); if(v&&!v.busy){S.cash+=TYPE[v.type].price*0.6; S.vehicles=S.vehicles.filter(x=>x!==v);} pendingConfirm=null; save(); refresh(); return; }
+  if(a==="sell"){ const v=S.vehicles.find(x=>x.id===id); if(v&&!tripOf(v)){S.cash+=TYPE[v.type].price*0.6; S.vehicles=S.vehicles.filter(x=>x!==v);} pendingConfirm=null; save(); refresh(); return; }
   if(a==="cancel"){ pendingConfirm=null; renderPanel(); return; }
   if(a==="speed"){ syncClock(); S.speed=+el.dataset.s; save(); renderPanel(); return; }
   if(a==="askReset"){ pendingConfirm="reset"; renderPanel(); return; }
@@ -1066,6 +1131,15 @@ function buildHub(){
 }
 
 /* ---------------- Save / load ---------------- */
+// Saves from before multi-load trips kept one job per trip; convert them.
+function migrateTrip(tr){
+  if(tr.loads) return tr;
+  const j = tr.job, kinds = ["drive","stop","drive","stop","drive"];
+  const segs = tr.segs.map((sg,i)=>({...sg, kind:kinds[i], sk: i===1?"pick":i===3?"drop":undefined, jid:j.id,
+    next: i===0?{sk:"pick",jid:j.id}: i===2?{sk:"drop",jid:j.id}:undefined, mi: i===0?(tr.deadMi||0): i===2?(tr.haulMi||j.miles||0): i===4?(tr.retMi||0):0, done: S.clock>=sg.t1}));
+  return {id:tr.id, v:tr.v, drivers:tr.drivers, startAt:tr.segs[0].t0, endAt:tr.endAt, segs,
+    loads:[{job:j, picked: S.clock>=tr.segs[1].t1, delivered: !!tr.delivered, cut: tr.cut||0}]};
+}
 function syncClock(){ const now=Date.now(); S.clock += (now-S.lastReal)*S.speed; S.lastReal = now; }
 function save(){ if(!S) return; try{ localStorage.setItem(KEY, JSON.stringify(S, (k,v)=>k==="cum"?undefined:v)); }catch(_){} }
 function afterLoad(){ drawBases(); drawJobs(); setTab(tab); }
@@ -1092,6 +1166,7 @@ function start(){
   try{ const raw = localStorage.getItem(KEY); if(raw) loaded = JSON.parse(raw); }catch(_){}
   if(loaded && loaded.v===2){
     S = loaded;
+    S.trips = S.trips.map(migrateTrip); S.vehicles.forEach(v=>{ delete v.ret; v.busy = !!tripOf(v); });
     S.bases.forEach((b,i)=>{ if(b.tier==null) b.tier=0; delete b.slots; if(!b.name) b.name = b.home ? "HQ" : `Hub ${i+1}`; });
     S.jobs = S.jobs.filter(fitsUnlocked);
     S.jobs.forEach(j=>{ j.pay = jobPay(j); if(j.urg==="standard") j.expires=null; if(!j.from.name){ j.from.name=bizName(j.from.biz); j.from.num=houseNo(); j.to.name=bizName(j.to.biz); j.to.num=houseNo(); } });
