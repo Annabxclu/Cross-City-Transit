@@ -263,7 +263,7 @@ function routeJob(j){
       if(!j.chain && !fitsUnlocked(j)){ S.jobs = S.jobs.filter(x=>x!==j); if(selectedJob===j.id) selectedJob=null; spawnJob(pick(S.bases)); drawJobs(); renderPanel(); return; }
     }
     if(j.id===selectedJob) drawSelection();
-    if(tab==="jobs") renderPanel();
+    if(tab==="jobs"||tab==="rail") renderPanel();
   });
 }
 
@@ -916,11 +916,18 @@ function evChip(j){ return `<span class="chip evchip" style="--ev:${j.evColor||"
 function chainChip(j){ return `<span class="chip chainchip"><i></i>Intermodal · leg ${j.chain.leg} of 3${j.chain.leg===2?" · train":" · truck"}</span>`; }
 function cargoChip(c){ return `<span class="chip" style="color:var(--c-${c})"><i></i><span style="color:var(--ink)">${esc(CARGO[c].n)}</span></span>`; }
 function urgTag(u){ return u==="standard"?"":`<span class="urg ${u}">${u}</span>`; }
-function setTab(t){ tab=t; pendingConfirm=null; renderPanel(); document.querySelectorAll(".tab").forEach(b=>b.setAttribute("aria-selected", b.dataset.tab===t)); }
+const MENU_PAGES = {fleet:"Fleet", shop:"Shop", crew:"Crew", tasks:"Tasks", log:"Log", company:"Company"};
+function markTabs(){
+  document.querySelectorAll(".tab[data-tab]").forEach(b=>b.setAttribute("aria-selected", b.dataset.tab===tab));
+  const inMenu = tab in MENU_PAGES;
+  $("#menuBtn").setAttribute("aria-selected", inMenu); $("#menuLabel").textContent = inMenu ? MENU_PAGES[tab] : "Menu";
+  document.querySelectorAll(".menuitem").forEach(b=>b.classList.toggle("on", b.dataset.tab===tab));
+}
+function setTab(t){ tab=t; pendingConfirm=null; renderPanel(); markTabs(); }
 function selectJob(id, fly){
-  selectedJob=id; chosenVeh=null; tab="jobs";
-  document.querySelectorAll(".tab").forEach(b=>b.setAttribute("aria-selected", b.dataset.tab==="jobs"));
-  const j = S.jobs.find(x=>x.id===id); if(j){ routeJob(j); if(fly) fitJob(j); }
+  selectedJob=id; chosenVeh=null;
+  const j = S.jobs.find(x=>x.id===id);
+  tab = j && j.rail ? "rail" : "jobs"; markTabs(); if(j){ routeJob(j); if(fly) fitJob(j); }
   drawJobs(); renderPanel(); $("#panelBody").scrollTop=0;
 }
 function goals(){
@@ -971,23 +978,33 @@ function dispatchCard(j){
     ${opts}
   </section>`;
 }
-function renderJobs(){
-  const sj = S.jobs.find(j=>j.id===selectedJob);
-  const list = S.jobs.map(j=>({j,can:jobStatus(j).can})).sort((a,b)=>(b.can-a.can)||(b.j.pay-a.j.pay));
+function renderJobs(mode="truck"){
+  const rail = mode==="rail";
+  if(rail && level() < RAIL_LVL) return `<section class="sec"><h2>Train jobs</h2><div class="card dim"><div class="row"><b>Trains unlock at level ${RAIL_LVL}</b><span class="lock">Level ${RAIL_LVL}</span></div><p class="hint">Run trains between real freight yards on real track, and hand containers to your trucks at each end. You are level ${level()}.</p></div></section>`;
+  const sj = S.jobs.find(j=>j.id===selectedJob && !!j.rail===rail);
+  const list = S.jobs.filter(j=>!!j.rail===rail).map(j=>({j,can:jobStatus(j).can})).sort((a,b)=>(b.can-a.can)||(b.j.pay-a.j.pay));
   const can = list.filter(x=>x.can), cant = list.filter(x=>!x.can && !x.j.locked), waiting = list.filter(x=>x.j.locked);
   const open = goals().filter(x=>!x[1]).slice(0,3);
   let h = "";
   if(sj) h += dispatchCard(sj);
-  if(S.jobsDone<1 && !sj) h += `<p class="hint" style="color:var(--ink)">Tap an orange pin on the map, or pick a job below, then send your van. Gray pins need a vehicle you do not own yet.</p>`;
-  { const L_=level(), need=xpNeed(L_+1), left=Math.max(0,Math.ceil((need-S.xp)*100)), nxt=Object.entries(UNLOCKS).find(([k])=>+k>L_);
+  if(rail){
+    const trains = S.vehicles.filter(isTrain);
+    if(!trains.length) h += `<p class="hint" style="color:var(--ink)">You have no trains yet. Buy a locomotive in <b>Menu → Shop</b>, add railcars in <b>Menu → Fleet</b>, and hire an engineer in <b>Menu → Crew</b>.</p>`;
+    h += `<p class="hint">Rail jobs run between real freight yards (square markers on the map). Intermodal legs 1 and 3 are truck jobs on the Truck jobs tab.</p>`;
+  }
+  if(!rail && S.jobsDone<1 && !sj) h += `<p class="hint" style="color:var(--ink)">Tap an orange pin on the map, or pick a job below, then send your van. Gray pins need a vehicle you do not own yet.</p>`;
+  if(!rail){ const L_=level(), need=xpNeed(L_+1), left=Math.max(0,Math.ceil((need-S.xp)*100)), nxt=Object.entries(UNLOCKS).find(([k])=>+k>L_);
     h += `<section class="sec"><div class="sec-head"><h3>Level ${L_} → ${L_+1}</h3><span class="hint num">${Math.floor(S.xp-xpNeed(L_)).toLocaleString("en-US")} / ${(need-xpNeed(L_)).toLocaleString("en-US")} XP</span></div>
       <div class="prog"><i style="width:${Math.min(100,(S.xp-xpNeed(L_))/(need-xpNeed(L_))*100)}%;background:var(--sign)"></i></div>
       <p class="hint">${Math.ceil(need-S.xp).toLocaleString("en-US")} XP to level ${L_+1}. Each delivery earns 1 XP per $100 it pays.${nxt?` Next unlock: ${esc(nxt[1])} at level ${nxt[0]}.`:""} Board: ${boardCount()} of ${maxJobs()} jobs, a new one every ${JOB_EVERY_MS/1000} seconds.</p></section>`; }
-  if(open.length) h += `<section class="sec"><h3>Next goals</h3><ul class="goals">${open.map(x=>`<li>${esc(x[0])}</li>`).join("")}</ul></section>`;
-  h += `<section class="sec"><div class="sec-head"><h2>Ready to run</h2><span class="hint num">${can.length}</span></div>${can.length?`<div class="list">${can.map(x=>jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. A new job posts every 30 seconds.</p>`}</section>`;
+  if(!rail && open.length) h += `<section class="sec"><h3>Next goals</h3><ul class="goals">${open.map(x=>`<li>${esc(x[0])}</li>`).join("")}</ul></section>`;
+  h += `<section class="sec"><div class="sec-head"><h2>Ready to run</h2><span class="hint num">${can.length}</span></div>${can.length?`<div class="list">${can.map(x=>jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. ${rail?"A new rail job posts as soon as a train is free.":"A new job posts every 30 seconds."}</p>`}</section>`;
   if(cant.length) h += `<section class="sec"><div class="sec-head"><h2>Other jobs nearby</h2><span class="hint num">${cant.length}</span></div><div class="list">${cant.map(x=>jobCard(x.j)).join("")}</div></section>`;
   if(waiting.length) h += `<section class="sec"><div class="sec-head"><h2>Next intermodal legs</h2><span class="hint num">${waiting.length}</span></div><p class="hint">Each opens when the leg before it is delivered. Finish all three for a ${CHAIN_BONUS*100}% bonus.</p><div class="list">${waiting.map(x=>jobCard(x.j)).join("")}</div></section>`;
   return h;
+}
+function renderAir(){
+  return `<section class="sec"><h2>Air cargo jobs</h2><div class="card dim"><div class="row"><b>Air cargo is coming</b><span class="lock">Level 20</span></div><p class="hint">Unlock airports and fly urgent freight between them, Pocket Planes style. Planes will show up here once air cargo is built.</p></div></section>`;
 }
 function stopName(tr, sk, jid){ const j = tr.loads.find(l=>l.job.id===jid)?.job; if(!j) return ""; return sk==="pick" ? (j.from.name||j.from.biz) : (j.to.name||j.to.biz); }
 function phaseText(tr,t){
@@ -1058,7 +1075,7 @@ function yardOptions(){
 function renderTrainShop(L_){
   if(L_ < RAIL_LVL) return `<div class="card dim"><div class="row"><b>Trains</b><span class="lock">Level ${RAIL_LVL}</span></div><p class="hint">Run trains between real freight yards and hand containers to your trucks at each end.</p></div>`;
   const yo = yardOptions();
-  return `<p class="hint">Trains run between real freight yards on real track. Each train needs a locomotive, railcars for the cargo, and an engineer (Crew tab). Add railcars from the train's card in the Fleet tab.</p>
+  return `<p class="hint">Trains run between real freight yards on real track. Each train needs a locomotive, railcars for the cargo, and an engineer (Menu → Crew). Add railcars from the train's card in Menu → Fleet.</p>
     ${LOCOS.map(l=>{ const locked = l.lvl>L_, poor = S.cash<l.price;
       return `<div class="card ${locked?"dim":""}"><div class="row"><b><span class="vic">${iconSvg("train",13)}</span>${esc(l.n)}</b><span class="num">${money(l.price)}</span></div>
         <div class="meta"><span class="num">Up to ${l.maxCars} railcars</span><span class="num">${l.leg.toLocaleString("en-US")} mi range</span><span>Engineer</span></div>
@@ -1157,14 +1174,15 @@ function renderHeader(){
   $("#hdrLvl").textContent = `Level ${L_} · ${Math.floor(S.xp-a).toLocaleString("en-US")}/${(b-a).toLocaleString("en-US")} XP`;
   $("#hdrXp").style.width = (L_>=50?100:Math.min(100,(S.xp-a)/(b-a)*100)) + "%";
   $("#hdrTrips").textContent = S.trips.length;
-  $("#jobBadge").textContent = S.jobs.filter(j=>jobStatus(j).can).length;
-  const cc = claimableCount(), tb = $("#taskBadge"); tb.textContent = cc; tb.hidden = !cc;
+  $("#jobBadge").textContent = S.jobs.filter(j=>!j.rail && jobStatus(j).can).length;
+  const rc = S.jobs.filter(j=>j.rail && jobStatus(j).can).length, rb = $("#railBadge"); rb.textContent = rc; rb.hidden = !rc;
+  const cc = claimableCount(); for(const id of ["#taskBadge","#taskBadge2"]){ const tb = $(id); tb.textContent = cc; tb.hidden = !cc; }
 }
 function renderPanel(){
   if(!S) return;
   const body = $("#panelBody"), st = body.scrollTop;
   const ae = document.activeElement, keep = ae && ae.id && body.contains(ae) && ae.tagName==="INPUT" ? {id:ae.id, v:ae.value, a:ae.selectionStart, b:ae.selectionEnd} : null;
-  body.innerHTML = tab==="jobs"?renderJobs():tab==="fleet"?renderFleet():tab==="shop"?renderShop():tab==="crew"?renderCrew():tab==="log"?renderLog():tab==="tasks"?renderTasks():renderCompany();
+  body.innerHTML = tab==="jobs"?renderJobs("truck"):tab==="rail"?renderJobs("rail"):tab==="air"?renderAir():tab==="fleet"?renderFleet():tab==="shop"?renderShop():tab==="crew"?renderCrew():tab==="log"?renderLog():tab==="tasks"?renderTasks():renderCompany();
   body.scrollTop = st;
   if(keep){ const el = document.getElementById(keep.id); if(el){ el.value = keep.v; el.focus(); try{ el.setSelectionRange(keep.a, keep.b); }catch(_){} } }
   renderHeader();
@@ -1228,7 +1246,7 @@ $("#panelBody").addEventListener("click", e=>{
     const l = TYPE[id], y = $("#ly-"+id)?.value; if(!l || !YARD[y] || S.cash < l.price || level() < l.lvl) return;
     S.cash -= l.price; const n = S.vehicles.filter(isTrain).length + 1;
     S.vehicles.push({id:nid("v"), type:l.id, yard:y, cars:{}, n:`Train ${n}`, busy:false, jobs:0, miles:0});
-    toast(`Bought a ${esc(l.n.toLowerCase())} at ${esc(YARD[y].n)}. Add railcars in the Fleet tab${S.drivers.some(d=>d.kind==="eng")?"":" and hire an engineer"}.`, 6000);
+    toast(`Bought a ${esc(l.n.toLowerCase())} at ${esc(YARD[y].n)}. Add railcars in Menu → Fleet${S.drivers.some(d=>d.kind==="eng")?"":" and hire an engineer"}.`, 6000);
     drawYards(); save(); refresh(); return;
   }
   if(a==="addCar"){
@@ -1253,7 +1271,13 @@ $("#panelBody").addEventListener("click", e=>{
 $("#panelBody").addEventListener("keydown", e=>{ if(e.key==="Enter" && e.target.id?.startsWith("ren-")){ e.preventDefault(); $(`[data-act=ren][data-id="${e.target.id.slice(4)}"]`)?.click(); }
   if(e.key==="Enter" && e.target.id?.startsWith("renh-")){ e.preventDefault(); $(`[data-act=renHub][data-id="${e.target.id.slice(5)}"]`)?.click(); } if(e.key==="Escape" && e.target.id?.startsWith("ren-")){ pendingConfirm=null; renderPanel(); } });
 $("#panelBody").addEventListener("change", e=>{ if(e.target.name==="veh") chosenVeh=e.target.value; if(e.target.id==="testToggle"){ S.test = e.target.checked; save(); renderPanel(); } });
-document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>setTab(b.dataset.tab)));
+document.querySelectorAll(".tab[data-tab]").forEach(b=>b.addEventListener("click",()=>{ closeMenu(); setTab(b.dataset.tab); }));
+// Menu dropdown for Fleet, Shop, Crew, Tasks, Log and Company
+function closeMenu(){ $("#menu").hidden = true; $("#menuBtn").setAttribute("aria-expanded","false"); }
+$("#menuBtn").addEventListener("click", e=>{ e.stopPropagation(); const open = $("#menu").hidden; $("#menu").hidden = !open; $("#menuBtn").setAttribute("aria-expanded", open); if(open) $("#menu .menuitem")?.focus(); });
+document.querySelectorAll(".menuitem").forEach(b=>b.addEventListener("click", ()=>{ closeMenu(); setTab(b.dataset.tab); $("#menuBtn").focus(); }));
+document.addEventListener("click", e=>{ if(!e.target.closest(".menuwrap")) closeMenu(); });
+document.addEventListener("keydown", e=>{ if(e.key==="Escape" && !$("#menu").hidden){ closeMenu(); $("#menuBtn").focus(); } });
 
 function logEvent(html, when){ if(!S) return; (S.log ||= []).push({t: when||Date.now(), h: html}); if(S.log.length>20) S.log.splice(0, S.log.length-20); if(tab==="log" && !simulating) renderPanel(); }
 function toast(html, ms=3800, noLog){
