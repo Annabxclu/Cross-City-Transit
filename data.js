@@ -220,3 +220,100 @@ LOCOS.forEach(l=>{ TYPE[l.id] = l; });
 DRIVER_KIND.eng = {n:"Engineer", cut:0, fee:ENGINEER.fee, lvl:RAIL_LVL};
 Object.assign(PRODUCERS, {grain:["Grain Elevator"], coal:["Coal Mine"], gravel:["Quarry"]});
 Object.assign(ACCEPTORS, {grain:["Flour Mill"], coal:["Power Plant"], gravel:["Concrete Plant"]});
+
+/* ---------------- Air cargo ----------------
+   Real US airports. size: 1 regional, 2 mid-size, 3 major cargo hub. Bigger aircraft need bigger airports. */
+const AIRPORTS = [
+  ["MEM","Memphis International","Memphis","TN",35.0424,-89.9767,3],
+  ["SDF","Louisville Muhammad Ali International","Louisville","KY",38.1744,-85.7360,3],
+  ["ORD","O'Hare International","Chicago","IL",41.9786,-87.9048,3],
+  ["LAX","Los Angeles International","Los Angeles","CA",33.9425,-118.4081,3],
+  ["MIA","Miami International","Miami","FL",25.7959,-80.2870,3],
+  ["DFW","Dallas Fort Worth International","Dallas","TX",32.8998,-97.0403,3],
+  ["JFK","John F. Kennedy International","New York","NY",40.6413,-73.7781,3],
+  ["ATL","Hartsfield-Jackson Atlanta International","Atlanta","GA",33.6407,-84.4277,3],
+  ["CVG","Cincinnati Northern Kentucky International","Cincinnati","OH",39.0533,-84.6630,3],
+  ["IND","Indianapolis International","Indianapolis","IN",39.7173,-86.2944,3],
+  ["ONT","Ontario International","Ontario","CA",34.0560,-117.6012,3],
+  ["EWR","Newark Liberty International","Newark","NJ",40.6895,-74.1745,3],
+  ["SEA","Seattle-Tacoma International","Seattle","WA",47.4502,-122.3088,3],
+  ["IAH","George Bush Intercontinental","Houston","TX",29.9902,-95.3368,3],
+  ["OAK","Oakland International","Oakland","CA",37.7126,-122.2197,3],
+  ["PHL","Philadelphia International","Philadelphia","PA",39.8744,-75.2424,3],
+  ["DEN","Denver International","Denver","CO",39.8561,-104.6737,3],
+  ["PHX","Phoenix Sky Harbor International","Phoenix","AZ",33.4342,-112.0116,3],
+  ["MSP","Minneapolis-Saint Paul International","Minneapolis","MN",44.8848,-93.2223,2],
+  ["DTW","Detroit Metropolitan","Detroit","MI",42.2162,-83.3554,2],
+  ["BOS","Logan International","Boston","MA",42.3656,-71.0096,2],
+  ["CLT","Charlotte Douglas International","Charlotte","NC",35.2140,-80.9431,2],
+  ["MCO","Orlando International","Orlando","FL",28.4312,-81.3081,2],
+  ["TPA","Tampa International","Tampa","FL",27.9755,-82.5332,2],
+  ["BNA","Nashville International","Nashville","TN",36.1263,-86.6774,2],
+  ["STL","St. Louis Lambert International","St. Louis","MO",38.7487,-90.3700,2],
+  ["MCI","Kansas City International","Kansas City","MO",39.2976,-94.7139,2],
+  ["SLC","Salt Lake City International","Salt Lake City","UT",40.7899,-111.9791,2],
+  ["LAS","Harry Reid International","Las Vegas","NV",36.0840,-115.1537,2],
+  ["PDX","Portland International","Portland","OR",45.5898,-122.5951,2],
+  ["SAT","San Antonio International","San Antonio","TX",29.5337,-98.4698,2],
+  ["AUS","Austin-Bergstrom International","Austin","TX",30.1975,-97.6664,2],
+  ["CLE","Cleveland Hopkins International","Cleveland","OH",41.4058,-81.8539,2],
+  ["CMH","John Glenn Columbus International","Columbus","OH",39.9980,-82.8919,2],
+  ["PIT","Pittsburgh International","Pittsburgh","PA",40.4915,-80.2329,2],
+  ["RDU","Raleigh-Durham International","Raleigh","NC",35.8801,-78.7880,2],
+  ["BWI","Baltimore/Washington International","Baltimore","MD",39.1754,-76.6683,2],
+  ["IAD","Washington Dulles International","Dulles","VA",38.9531,-77.4565,2],
+  ["MSY","Louis Armstrong New Orleans International","New Orleans","LA",29.9934,-90.2580,2],
+  ["OKC","Will Rogers World","Oklahoma City","OK",35.3931,-97.6007,2],
+  ["ABQ","Albuquerque International Sunport","Albuquerque","NM",35.0402,-106.6091,2],
+  ["OMA","Eppley Airfield","Omaha","NE",41.3032,-95.8941,2],
+  ["ELP","El Paso International","El Paso","TX",31.8072,-106.3776,2],
+  ["JAX","Jacksonville International","Jacksonville","FL",30.4941,-81.6879,2],
+  ["RFD","Chicago Rockford International","Rockford","IL",42.1954,-89.0972,2],
+  ["AFW","Fort Worth Alliance","Fort Worth","TX",32.9876,-97.3188,2],
+  ["BOI","Boise Airport","Boise","ID",43.5644,-116.2228,1],
+  ["BIL","Billings Logan International","Billings","MT",45.8077,-108.5429,1],
+  ["FAR","Hector International","Fargo","ND",46.9207,-96.8158,1],
+  ["FSD","Sioux Falls Regional","Sioux Falls","SD",43.5820,-96.7419,1],
+  ["DSM","Des Moines International","Des Moines","IA",41.5340,-93.6631,1],
+  ["ICT","Wichita Eisenhower National","Wichita","KS",37.6499,-97.4331,1],
+  ["LIT","Clinton National","Little Rock","AR",34.7294,-92.2243,1],
+  ["JAN","Jackson-Medgar Wiley Evers International","Jackson","MS",32.3112,-90.0759,1],
+  ["BHM","Birmingham-Shuttlesworth International","Birmingham","AL",33.5629,-86.7535,1],
+  ["SAV","Savannah/Hilton Head International","Savannah","GA",32.1276,-81.2021,1],
+  ["CHS","Charleston International","Charleston","SC",32.8986,-80.0405,1],
+  ["RIC","Richmond International","Richmond","VA",37.5052,-77.3197,1],
+  ["BDL","Bradley International","Hartford","CT",41.9389,-72.6832,1],
+  ["PWM","Portland International Jetport","Portland","ME",43.6462,-70.3093,1],
+  ["BTV","Burlington International","Burlington","VT",44.4720,-73.1533,1],
+  ["MHT","Manchester-Boston Regional","Manchester","NH",42.9326,-71.4357,1],
+  ["ALB","Albany International","Albany","NY",42.7483,-73.8017,1],
+  ["BUF","Buffalo Niagara International","Buffalo","NY",42.9405,-78.7322,1],
+  ["MKE","Milwaukee Mitchell International","Milwaukee","WI",42.9472,-87.8966,1],
+  ["GRR","Gerald R. Ford International","Grand Rapids","MI",42.8808,-85.5228,1],
+  ["CYS","Cheyenne Regional","Cheyenne","WY",41.1557,-104.8118,1],
+  ["RNO","Reno-Tahoe International","Reno","NV",39.4991,-119.7681,1],
+  ["TUS","Tucson International","Tucson","AZ",32.1161,-110.9410,1],
+  ["GEG","Spokane International","Spokane","WA",47.6199,-117.5338,1],
+  ["LBB","Lubbock Preston Smith International","Lubbock","TX",33.6636,-101.8228,1],
+  ["CRW","Yeager Airport","Charleston","WV",38.3731,-81.5932,1],
+  ["ILG","Wilmington Airport","Wilmington","DE",39.6787,-75.6065,1],
+  ["PVD","Rhode Island T. F. Green International","Providence","RI",41.7240,-71.4282,1]
+].map(([id,n,city,s,lat,lon,size])=>({id,n,city,s,lat,lon,size}));
+const AIRPORT = Object.fromEntries(AIRPORTS.map(a=>[a.id,a]));
+const AIR_LVL = 20;
+const AIR_PAY = 3;               // air pays more per pound-mile than trucks
+const MAX_AIR_DEADHEAD = 1200;   // a plane can fly empty this far to reach a pickup airport
+const PILOT = {n:"Pilot", fee:25000, lvl:AIR_LVL};
+const AIRPORT_SIZE = {1:"Regional", 2:"Mid-size", 3:"Major cargo hub"};
+const PLANES = [
+  {id:"prop",      n:"Courier prop plane",     price:450000,   cap:3000,   leg:900,  lvl:20, minSize:1, lic:"pilot"},
+  {id:"turboprop", n:"Turboprop freighter",    price:1500000,  cap:12000,  leg:1200, lvl:24, minSize:1, lic:"pilot"},
+  {id:"rjet",      n:"Regional jet freighter", price:6000000,  cap:25000,  leg:1800, lvl:30, minSize:2, lic:"pilot2"},
+  {id:"narrow",    n:"Narrowbody freighter",   price:18000000, cap:50000,  leg:3000, lvl:38, minSize:2, lic:"pilot2"},
+  {id:"wide",      n:"Widebody freighter",     price:60000000, cap:220000, leg:4500, lvl:50, minSize:3, lic:"pilot2"}
+];
+PLANES.forEach(p=>{ p.mode = "plane"; TYPE[p.id] = p; });
+DRIVER_KIND.pilot = {n:"Pilot", cut:0, fee:PILOT.fee, lvl:AIR_LVL};
+Object.assign(CARGO, {express:{n:"Express documents",mult:1.3}, electronics:{n:"Electronics",mult:1.5}, medical:{n:"Medical supplies",mult:1.6}, perishables:{n:"Perishables",mult:1.4}});
+const AIR_CARGO = ["parcels","express","electronics","medical","perishables"];
+Object.assign(UNLOCKS, {20:"Air cargo (prop planes and pilots), road freight locomotive, car haulers", 24:"Turboprop freighter", 30:"Regional jet freighter, heavy-haul locomotive", 38:"Narrowbody freighter", 50:"Widebody freighter"});

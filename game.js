@@ -110,14 +110,31 @@ const baseById = id => S.bases.find(b=>b.id===id);
 const hubCap = b => HUB_TIERS[b.tier||0].cap;
 // Each kind of vehicle has its own job board: one more job than you have of that kind.
 const maxJobs = () => trucks().length + 1;
-const boardCount = () => S.jobs.filter(j=>!j.rail).length;
+const jobKind = j => j.air ? "air" : j.rail ? "rail" : "truck";
+const boardCount = () => S.jobs.filter(j=>jobKind(j)==="truck").length;
+const maxAirJobs = () => S.vehicles.filter(isPlane).length + 1;
+const airCount = () => S.jobs.filter(j=>j.air).length;
 const maxRailJobs = () => S.vehicles.filter(isTrain).length + 1;
 const railCount = () => S.jobs.filter(j=>j.rail).length;
 /* ---------------- Rail helpers ---------------- */
 const isTrain = v => TYPE[v.type]?.mode==="train";
-const trucks = () => S.vehicles.filter(v=>!isTrain(v));
+const isPlane = v => TYPE[v.type]?.mode==="plane";
+const trucks = () => S.vehicles.filter(v=>!isTrain(v) && !isPlane(v));
+const airportPt = id => ({lat:AIRPORT[id].lat, lon:AIRPORT[id].lon});
+const airportStop = a => ({lat:a.lat, lon:a.lon, c:nearestCity(a), airport:a.id, biz:"Airport", name:`${a.id} ${a.n}`, label:`${a.n} (${a.id}), ${a.city} ${a.s}`});
+// Great-circle path for flights, as [lat,lon] points.
+function gcPath(a, b, n=48){
+  const r = Math.PI/180, la1=a.lat*r, lo1=a.lon*r, la2=b.lat*r, lo2=b.lon*r;
+  const d = 2*Math.asin(Math.sqrt(Math.sin((la2-la1)/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin((lo2-lo1)/2)**2));
+  if(d < 1e-6) return [[a.lat,a.lon],[b.lat,b.lon]];
+  const out = [];
+  for(let i=0;i<=n;i++){ const f=i/n, A=Math.sin((1-f)*d)/Math.sin(d), B=Math.sin(f*d)/Math.sin(d);
+    const x=A*Math.cos(la1)*Math.cos(lo1)+B*Math.cos(la2)*Math.cos(lo2), y=A*Math.cos(la1)*Math.sin(lo1)+B*Math.cos(la2)*Math.sin(lo2), z=A*Math.sin(la1)+B*Math.sin(la2);
+    out.push([+(Math.atan2(z,Math.hypot(x,y))/r).toFixed(4), +(Math.atan2(y,x)/r).toFixed(4)]); }
+  return out;
+}
 const yardPt = id => ({lat:YARD[id].lat, lon:YARD[id].lon});
-const homePt = v => v.yard ? yardPt(v.yard) : basePt(baseById(v.base));
+const homePt = v => v.airport ? airportPt(v.airport) : v.yard ? yardPt(v.yard) : basePt(baseById(v.base));
 const yardStop = y => ({lat:y.lat, lon:y.lon, c:nearestCity(y), yard:y.id, biz:"Rail yard", name:y.n, label:`${y.n}, ${y.city} ${y.s}`});
 const trainSlots = (v, ct) => { const n = (v.cars||{})[ct]||0; return RAILCARS[ct].unit ? n*RAILCARS[ct].cap : n; };
 const trainCarCount = v => Object.values(v.cars||{}).reduce((a,b)=>a+b,0);
@@ -169,7 +186,7 @@ function spawnJob(base, depth=0){
   const ownedTypes = [...new Set(trucks().map(v=>v.type))];
   const reach = TYPES.filter(t=>t.lvl<=L);   // only vehicles you can already buy
   // Keep the board useful: while fewer jobs fit your fleet than you have vehicles, only post jobs you can run.
-  const fitting = S.jobs.filter(x=>!x.rail && trucks().some(v=>{const tt=TYPE[v.type];return tt.cargo.includes(x.cargo)&&tt.cap>=x.weight&&tt.leg>=x.miles;})).length;
+  const fitting = S.jobs.filter(x=>jobKind(x)==="truck" && trucks().some(v=>{const tt=TYPE[v.type];return tt.cargo.includes(x.cargo)&&tt.cap>=x.weight&&tt.leg>=x.miles;})).length;
   const ownOnly = fitting < trucks().length;
   const t = ((ownOnly || Math.random()<0.85) && ownedTypes.length) ? TYPE[pick(ownedTypes)] : pick(reach);
   const cargo = pick(t.cargo);
@@ -227,11 +244,32 @@ function spawnRailJob(base){
   j.pay = jobPay(j); S.jobs.push(j); if(!simulating) routeJob(j);
   return j;
 }
+/* Air cargo jobs: airport to airport, sized to the aircraft you own or can buy. */
+function spawnAirJob(base){
+  const L = level(), avail = PLANES.filter(p=>p.lvl<=L); if(!avail.length) return null;
+  const owned = S.vehicles.filter(isPlane);
+  const pt = owned.length && Math.random()<0.75 ? TYPE[pick(owned).type] : pick(avail);
+  const anchors = S.bases.map(basePt).concat(owned.map(v=>airportPt(v.airport)));
+  const fits = a => a.size >= pt.minSize;
+  let Os = AIRPORTS.filter(a=>fits(a) && anchors.some(x=>hav(x,a)<=400));
+  if(!Os.length) Os = AIRPORTS.filter(fits);
+  const O = pick(Os);
+  const Ds = AIRPORTS.filter(a=>a!==O && fits(a) && hav(O,a)>=150 && hav(O,a)<=pt.leg*0.9); if(!Ds.length) return null;
+  const D = pick(Ds), cargo = pick(AIR_CARGO);
+  const weight = Math.max(200, Math.round(rnd(0.3,1)*pt.cap/50)*50);
+  const urg = Math.random()<0.2 ? "express" : Math.random()<0.45 ? "priority" : "standard";
+  const life = urg==="express" ? rnd(15,25)*MIN : rnd(25,40)*MIN;
+  const j = {id:nid("j"), base:base.id, air:true, cargo, weight, urg, from:{...airportStop(O)}, to:{...airportStop(D)}, miles:Math.round(hav(O,D)),
+    posted:S.clock, expires: urg==="standard" ? null : S.clock+life, routed:false};
+  j.pay = jobPay(j); S.jobs.push(j); routeJob(j);
+  return j;
+}
 // Fetch the real road route for a job, then quote it by road miles.
 // A job is only worth posting if some vehicle you can already buy could run it.
-const fitsUnlocked = j => j.rail ? LOCOS.some(l=>l.lvl<=level() && l.leg>=j.miles) : TYPES.some(t=>t.lvl<=level() && t.cargo.includes(j.cargo) && t.cap>=j.weight && t.leg>=j.miles);
+const fitsUnlocked = j => j.air ? PLANES.some(p=>p.lvl<=level() && p.leg>=j.miles && p.cap>=j.weight) : j.rail ? LOCOS.some(l=>l.lvl<=level() && l.leg>=j.miles) : TYPES.some(t=>t.lvl<=level() && t.cargo.includes(j.cargo) && t.cap>=j.weight && t.leg>=j.miles);
 function routeJob(j){
   if(j.routed || j.routing) return;
+  if(j.air){ j.path = gcPath(j.from, j.to); j.miles = Math.max(1, Math.round(hav(j.from, j.to))); j.pay = jobPay(j); j.routed = true; return; }
   j.routing = true;
   (j.rail ? getRailRoute : getRoute)(j.from, j.to).then(r=>{
     j.routing = false;
@@ -243,7 +281,7 @@ function routeJob(j){
       if(r.names){ j.from.street = r.names[0]; j.to.street = r.names[1]; }
       const m = jobMarkers.get(j.id); if(m) m.setLatLng([j.from.lat, j.from.lon]);
       // Real road miles can run past what any unlocked vehicle can reach; swap it for a new job.
-      if(!fitsUnlocked(j)){ S.jobs = S.jobs.filter(x=>x!==j); if(selectedJob===j.id) selectedJob=null; (j.rail ? spawnRailJob : spawnJob)(pick(S.bases)); drawJobs(); renderPanel(); return; }
+      if(!fitsUnlocked(j)){ S.jobs = S.jobs.filter(x=>x!==j); if(selectedJob===j.id) selectedJob=null; (j.air ? spawnAirJob : j.rail ? spawnRailJob : spawnJob)(pick(S.bases)); drawJobs(); renderPanel(); return; }
     }
     if(j.id===selectedJob) drawSelection();
     if(tab==="jobs"||tab==="rail") renderPanel();
@@ -253,6 +291,7 @@ function routeJob(j){
 /* ---------------- Eligibility & timing ---------------- */
 function freeDrivers(lic, cargo){
   const idle = S.drivers.filter(d=>!d.busy);
+  if(lic==="pilot"||lic==="pilot2"){ const p = idle.filter(d=>d.kind==="pilot"); const n = lic==="pilot2" ? 2 : 1; return p.length>=n ? p.slice(0,n) : null; }
   if(lic==="eng"){ const e = idle.filter(d=>d.kind==="eng"); return e[0] ? [e[0]] : null; }
   if(lic==="std"){
     const own = idle.filter(d=>d.kind==="owner");
@@ -267,6 +306,7 @@ function freeDrivers(lic, cargo){
 const driveMs = (miles, slow, f) => (1 + miles/30) * MIN * slow * f;   // original pace: 1 min + 1 min per 30 road miles
 function handleMs(j){ // loading or unloading time for this load
   if(j.rail) return (0.5 + 0.5*j.units)*MIN;
+  if(j.air) return Math.min(8, 2 + j.weight/20000)*MIN;
   const m = j.cargo==="vehicles" ? LOAD_BASE_MIN + LOAD_MIN_PER_CAR*j.weight : LOAD_BASE_MIN + LOAD_MIN_PER_1000LB*j.weight/1000;
   return m*MIN;
 }
@@ -280,7 +320,8 @@ const openLoads = tr => tr ? tr.loads.filter(l=>!l.delivered) : [];
 const usedRoom = tr => openLoads(tr).reduce((n,l)=>n+l.job.weight, 0);
 const roomStr = (t, n) => t.cars ? `${n} of ${t.cap} cars` : `${n.toLocaleString("en-US")} of ${t.cap.toLocaleString("en-US")} lb`;
 // Trains: 5 min + 1 min per 25 track miles loaded, twice as fast empty.
-const legMs = (mi, loaded, type) => type.mode==="train" ? (loaded ? (5 + mi/25)*MIN : Math.max(0.5*MIN, mi/50*MIN)) : loaded ? driveMs(mi, type.slow, 1) : Math.max(0.2*MIN, mi/30/2*MIN);
+// Planes: 3 min + 1 min per 100 miles loaded, twice as fast empty.
+const legMs = (mi, loaded, type) => type.mode==="plane" ? (loaded ? (3 + mi/100)*MIN : Math.max(0.5*MIN, mi/200*MIN)) : type.mode==="train" ? (loaded ? (5 + mi/25)*MIN : Math.max(0.5*MIN, mi/50*MIN)) : loaded ? driveMs(mi, type.slow, 1) : Math.max(0.2*MIN, mi/30/2*MIN);
 
 // Builds the stops and drives for a vehicle from time t, optionally with one more job. Changes nothing.
 function planRoute(v, tr, extra, t){
@@ -305,10 +346,10 @@ function planRoute(v, tr, extra, t){
     const nx = avail[0]; pending.splice(pending.indexOf(nx),1);
     const j = nx.l.job, pt = nx.sk==="pick" ? j.from : j.to;
     const direct = prev && prev.sk==="pick" && nx.sk==="drop" && prev.l===nx.l;   // straight from its own pickup
-    const mi = direct ? j.miles : estMi(cur, pt);
+    const plane = type.mode==="plane", mi = direct ? j.miles : plane ? hav(cur, pt) : estMi(cur, pt);
     if(mi >= 0.05){
       const loaded = onboard.size>0, ms = legMs(mi, loaded, type);
-      segs.push({kind:"drive", ph:loaded?"haul":"dead", path: direct && j.path ? j.path : straight(cur, pt), t0:tt, t1:tt+ms, mi, next:{sk:nx.sk, jid:j.id}});
+      segs.push({kind:"drive", ph:loaded?"haul":"dead", path: direct && j.path ? j.path : plane ? gcPath(cur, pt) : straight(cur, pt), t0:tt, t1:tt+ms, mi, next:{sk:nx.sk, jid:j.id}});
       tt += ms;
     }
     if(extra && nx.sk==="pick" && j.id===extra.id) deadToExtra = direct ? 0 : mi;
@@ -318,8 +359,8 @@ function planRoute(v, tr, extra, t){
     if(nx.sk==="pick"){ picked.add(j.id); onboard.add(j.id); } else onboard.delete(j.id);
     cur = pt; prev = nx;
   }
-  const back = estMi(cur, hub);
-  if(back >= 0.05){ const ms = legMs(back, false, type); segs.push({kind:"drive", ph:"ret", path:straight(cur, hub), t0:tt, t1:tt+ms, mi:back}); tt += ms; }
+  const back = type.mode==="plane" ? hav(cur, hub) : estMi(cur, hub);
+  if(back >= 0.05){ const ms = legMs(back, false, type); segs.push({kind:"drive", ph:"ret", path:type.mode==="plane" ? gcPath(cur, hub) : straight(cur, hub), t0:tt, t1:tt+ms, mi:back}); tt += ms; }
   else segs.push({kind:"drive", ph:"ret", path:[[hub.lat,hub.lon]], t0:tt, t1:tt+0.2*MIN, mi:0}), tt += 0.2*MIN;
   const dropOf = id => segs.find(s=>s.kind==="stop" && s.sk==="drop" && s.jid===id);
   return {segs, endAt:tt, loads, dropOf, deadToExtra, pos};
@@ -352,9 +393,28 @@ function trainFor(v, j){
   if(!ds) return {ok:false, why:"No free engineer", nodriver:true};
   return {ok:true, drivers:ds, plan:planTrip(v,j)};
 }
+function planeFor(v, j){
+  const t = TYPE[v.type];
+  if(!j.air) return {ok:false, why:"Planes fly air cargo jobs only"};
+  for(const st of [j.from, j.to]) if(AIRPORT[st.airport].size < t.minSize) return {ok:false, why:`Runway too small at ${st.airport}`};
+  if(j.weight > t.cap) return {ok:false, why:"Too heavy"};
+  if(j.miles > t.leg) return {ok:false, why:`Over ${t.leg.toLocaleString("en-US")} mi range`};
+  const tr = tripOf(v); let ds, from;
+  if(tr){
+    const used = usedRoom(tr);
+    if(used + j.weight > t.cap) return {ok:false, why:`Not enough room (${roomStr(t, used)} used)`, busy:true};
+    if(openLoads(tr).length >= MAX_LOADS) return {ok:false, why:`Already carrying ${MAX_LOADS} loads`, busy:true};
+    ds = tr.drivers.map(id=>S.drivers.find(d=>d.id===id)).filter(Boolean); from = llPt(posOf(tr, S.clock).ll);
+  } else { ds = freeDrivers(t.lic); from = airportPt(v.airport); }
+  if(hav(from, j.from) > MAX_AIR_DEADHEAD) return {ok:false, why:`Over ${MAX_AIR_DEADHEAD.toLocaleString("en-US")} mi from the pickup airport`};
+  if(!ds) return {ok:false, why: t.lic==="pilot2" ? "Needs 2 free pilots" : "No free pilot", nodriver:true};
+  return {ok:true, drivers:ds, plan:planTrip(v,j)};
+}
 function vehicleFor(v, j){
   if(isTrain(v)) return trainFor(v, j);
+  if(isPlane(v)) return planeFor(v, j);
   if(j.rail) return {ok:false, why:"Needs a train"};
+  if(j.air) return {ok:false, why:"Needs a plane"};
   const t = TYPE[v.type];
   if(!t.cargo.includes(j.cargo)) return {ok:false, why:"Wrong trailer"};
   if(j.weight > t.cap) return {ok:false, why:"Too heavy"};
@@ -379,6 +439,8 @@ function jobStatus(j){
   if(ok.length) return {can:true, opts:ok};
   const capable = opts.filter(o=>o.r.busy||o.r.nodriver);
   if(capable.length) return {can:false, soon:true, why: capable.some(o=>o.r.busy) ? "Your matching vehicles are busy" : capable[0].r.why};
+  if(j.air){ const p = PLANES.find(p=>p.leg>=j.miles && p.cap>=j.weight && AIRPORT[j.from.airport].size>=p.minSize && AIRPORT[j.to.airport].size>=p.minSize);
+    return {can:false, why: p ? `Needs a ${p.n.toLowerCase()} or bigger${p.lvl>level()?` · level ${p.lvl}`:""}` : "No aircraft can fly this"}; }
   if(j.rail){ const lo = LOCOS.filter(l=>l.leg>=j.miles)[0], carN = RAILCARS[j.carType].n.toLowerCase();
     return {can:false, why:`Needs a train with ${j.carType==="well"?"a container well car":`${j.units} ${carN}${j.units>1?"s":""}`}${lo&&lo.lvl>level()?` · level ${lo.lvl}`:""}`}; }
   const fit = TYPES.filter(t=>t.cargo.includes(j.cargo)&&t.cap>=j.weight&&t.leg>=j.miles).sort((a,b)=>a.price-b.price)[0];
@@ -472,6 +534,11 @@ function logic(){
   if(level()>=RAIL_LVL && railCount() < maxRailJobs() && S.clock >= (S.nextRailAt||0)){
     const rj = spawnRailJob(pick(S.bases)); S.nextRailAt = S.clock + (railCount()<=1 ? 5000 : JOB_EVERY_MS);
     if(rj){ changed = true; if(!simulating && !awayLog) toast(`New rail job: <b>${esc(rj.from.name)}</b> to ${esc(rj.to.name)} · <span class="num">${money(rj.pay)}</span>`, 3500); }
+  }
+  // Air cargo jobs: their own board, one more than your number of planes.
+  if(level()>=AIR_LVL && airCount() < maxAirJobs() && S.clock >= (S.nextAirAt||0)){
+    const aj = spawnAirJob(pick(S.bases)); S.nextAirAt = S.clock + (airCount()<=1 ? 5000 : JOB_EVERY_MS);
+    if(aj){ changed = true; if(!simulating && !awayLog) toast(`New air cargo job: <b>${esc(aj.from.airport)}</b> to <b>${esc(aj.to.airport)}</b> · <span class="num">${money(aj.pay)}</span>`, 3500); }
   }
   // Truck jobs: one more than your number of trucks.
   if(boardCount() < maxJobs() && (boardCount()===0 || S.clock >= (S.nextJobAt||0))){
@@ -654,7 +721,7 @@ function claimableCount(){
 /* ---------------- Event jobs ---------------- */
 // Turns a freshly posted job into an event load when an event is running.
 function maybeEventJob(j){
-  if(j.rail) return j;
+  if(j.rail || j.air) return j;
   const ev = activeEvent(); if(!ev || Math.random() > EVENT_SHARE) return j;
   if(!["general","parcels","pallets","furniture"].includes(j.cargo)) return j;
   const it = pick(ev.items);
@@ -663,7 +730,7 @@ function maybeEventJob(j){
   j.to.biz = pick(it.to); j.to.name = bizName(j.to.biz);
   return j;
 }
-const jobPay = j => Math.round(payFor(j.miles, j.weight, j.cargo, j.urg) * (j.event ? EVENT_PAY_BONUS : 1) * (j.rail ? RAIL_PAY : 1));
+const jobPay = j => Math.round(payFor(j.miles, j.weight, j.cargo, j.urg) * (j.event ? EVENT_PAY_BONUS : 1) * (j.rail ? RAIL_PAY : 1) * (j.air ? AIR_PAY : 1));
 
 /* ---------------- Tasks tab ---------------- */
 function bar(p, t, color){ return `<div class="prog"><i style="width:${Math.min(100, p/t*100)}%;${color?`background:${color}`:""}"></i></div>`; }
@@ -761,6 +828,10 @@ function drawYards(){
     const own = S.vehicles.some(v=>v.yard===y.id);
     L.marker([y.lat,y.lon], {icon:L.divIcon({className:"", html:`<div class="mk-yard ${own?"own":""}">${iconSvg("train",12)}</div>`, iconSize:[22,22], iconAnchor:[11,11]}), title:`${y.n}, ${y.city} ${y.s}${own?" · your trains":""}`, zIndexOffset:400}).addTo(layerYards);
   }
+  if(level() >= AIR_LVL) for(const a of AIRPORTS){
+    const own = S.vehicles.some(v=>v.airport===a.id);
+    L.marker([a.lat,a.lon], {icon:L.divIcon({className:"", html:`<div class="mk-air s${a.size} ${own?"own":""}">${iconSvg("plane",12)}</div>`, iconSize:[22,22], iconAnchor:[11,11]}), title:`${a.n} (${a.id}), ${a.city} ${a.s} · ${AIRPORT_SIZE[a.size]}${own?" · your planes":""}`, zIndexOffset:400}).addTo(layerYards);
+  }
   layerYards.addTo(map);
   syncRailLines();
 }
@@ -787,7 +858,7 @@ function drawJobs(){
   for(const j of S.jobs){
     if(j.locked) continue;
     let m = jobMarkers.get(j.id);
-    const cls = `mk-pin ${jobStatus(j).can?"":"cant"} ${j.id===selectedJob?"sel":""} ${j.event?"ev":""} ${j.rail?"rail":""}`;
+    const cls = `mk-pin ${jobStatus(j).can?"":"cant"} ${j.id===selectedJob?"sel":""} ${j.event?"ev":""} ${j.rail?"rail":""} ${j.air?"air":""}`;
     if(!m){
       m = L.marker([j.from.lat,j.from.lon], {icon:L.divIcon({className:"", html:`<div class="${cls}">${PIN_SVG}</div>`, iconSize:[22,28], iconAnchor:[11,27]}), title:`${CARGO[j.cargo].n} · ${money(j.pay)}`});
       m.on("click", e=>{ L.DomEvent.stopPropagation(e); selectJob(j.id); });
@@ -911,7 +982,7 @@ function setTab(t){ tab=t; pendingConfirm=null; renderPanel(); markTabs(); }
 function selectJob(id, fly){
   selectedJob=id; chosenVeh=null;
   const j = S.jobs.find(x=>x.id===id);
-  tab = j && j.rail ? "rail" : "jobs"; markTabs(); if(j){ routeJob(j); if(fly) fitJob(j); }
+  tab = !j ? "jobs" : j.air ? "air" : j.rail ? "rail" : "jobs"; markTabs(); if(j){ routeJob(j); if(fly) fitJob(j); }
   drawJobs(); renderPanel(); $("#panelBody").scrollTop=0;
 }
 function goals(){
@@ -926,7 +997,7 @@ function goals(){
 function jobCard(j){
   const st = jobStatus(j), local = j.from.c===j.to.c;
   return `<button class="card ${j.id===selectedJob?"sel":""} ${st.can?"":"dim"}" data-act="sel" data-id="${j.id}">
-    <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${j.rail?`<span class="chip railchip"><i></i>Rail</span>`:""}${j.event?evChip(j):""}${cargoChip(j.cargo)}${urgTag(j.urg)}</div><span class="pay">${money(j.pay)}</span></div>
+    <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${j.rail?`<span class="chip railchip"><i></i>Rail</span>`:""}${j.air?`<span class="chip airchip"><i></i>Air · ${esc(j.from.airport)} → ${esc(j.to.airport)}</span>`:""}${j.event?evChip(j):""}${cargoChip(j.cargo)}${urgTag(j.urg)}</div><span class="pay">${money(j.pay)}</span></div>
     <div class="route"><b>${esc(j.from.name||j.from.biz)}</b> <span class="arrow">→</span> <b>${esc(j.to.name||j.to.biz)}</b><br><span class="hint">${esc(addrLine(j.from))} → ${esc(addrLine(j.to))}</span></div>
     <div class="meta"><span class="num">${weightStr(j)}</span><span class="num">${j.routed?"":"about "}${j.miles} mi</span>${j.expires?`<span>expires in <span class="num" data-exp="${j.expires}">${dur(j.expires-S.clock)}</span></span>`:""}</div>
     ${st.can?`<span class="ok">${esc(st.opts[0].v.n)} · ${st.opts[0].r.plan.adding?"add to its trip · ":""}delivers in ${dur(st.opts[0].r.plan.deliverIn)}</span>`:j.rail?railNeeds(j):`<span class="need">${esc(st.why)}</span>`}
@@ -952,7 +1023,7 @@ function dispatchCard(j){
     opts = `<p class="need" style="font-size:13px;margin:0">${esc(st.why)}</p><div class="btnrow"><button class="btn ghost" data-act="unsel">Close</button>${st.soon?"":`<button class="btn ghost" data-act="tab" data-tab="shop">Open shop</button>`}</div>`;
   }
   return `<section class="dispatch" aria-label="Dispatch job">
-    <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${j.rail?`<span class="chip railchip"><i></i>Rail</span>`:""}${j.event?evChip(j):""}${cargoChip(j.cargo)}${urgTag(j.urg)}</div><span class="pay" style="font-size:18px">${money(j.pay)}</span></div>
+    <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${j.rail?`<span class="chip railchip"><i></i>Rail</span>`:""}${j.air?`<span class="chip airchip"><i></i>Air · ${esc(j.from.airport)} → ${esc(j.to.airport)}</span>`:""}${j.event?evChip(j):""}${cargoChip(j.cargo)}${urgTag(j.urg)}</div><span class="pay" style="font-size:18px">${money(j.pay)}</span></div>
     <div class="leg"><span class="dot"></span><span><b>${esc(j.from.name||j.from.biz)}</b> · ${esc(j.from.biz)}<br><span class="hint">${esc(addrLine(j.from))}</span></span>
       <span class="line"></span><span class="hint"><span class="num">${weightStr(j)}</span> · <span class="num">${j.miles} mi</span> ${j.routing?(j.rail?"· checking track":"· checking roads"):j.path?(j.rail?"by rail":"by road"):"(estimate)"}</span>
       <span class="dot end"></span><span><b>${esc(j.to.name||j.to.biz)}</b> · ${esc(j.to.biz)}<br><span class="hint">${esc(addrLine(j.to))}</span></span></div>
@@ -963,10 +1034,10 @@ function dispatchCard(j){
   </section>`;
 }
 // Dispatched loads stay on the job tab until they are delivered, with a countdown.
-function activeLoads(rail){
+function activeLoads(kind){
   const out = [];
   for(const tr of S.trips) for(const l of tr.loads){
-    if(l.delivered || !!l.job.rail !== rail) continue;
+    if(l.delivered || jobKind(l.job) !== kind) continue;
     const drop = tr.segs.find(sg=>sg.kind==="stop" && sg.sk==="drop" && sg.jid===l.job.id);
     out.push({tr, l, due: drop ? drop.t1 : tr.endAt});
   }
@@ -976,7 +1047,7 @@ function activeCard({tr, l, due}){
   const j = l.job, v = S.vehicles.find(x=>x.id===tr.v), t = displayClock();
   const total = Math.max(1, due - tr.startAt), pct = Math.min(100, Math.max(0, (t - tr.startAt)/total*100));
   return `<div class="card active">
-    <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${j.rail?`<span class="chip railchip"><i></i>Rail</span>`:""}${j.event?evChip(j):""}${cargoChip(j.cargo)}</div><span class="pay">${money(j.pay*(1-(l.cut||0)))}</span></div>
+    <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${j.rail?`<span class="chip railchip"><i></i>Rail</span>`:""}${j.air?`<span class="chip airchip"><i></i>Air · ${esc(j.from.airport)} → ${esc(j.to.airport)}</span>`:""}${j.event?evChip(j):""}${cargoChip(j.cargo)}</div><span class="pay">${money(j.pay*(1-(l.cut||0)))}</span></div>
     <div class="route"><b>${esc(j.from.name||j.from.biz)}</b> <span class="arrow">→</span> <b>${esc(j.to.name||j.to.biz)}</b></div>
     <div class="meta"><span class="num">${weightStr(j)}</span><span class="num">${j.miles} mi</span><span>${esc(v?v.n:"")}</span><span class="lst">${l.picked?"On board":"Heading to pickup"}</span></div>
     <div class="prog"><i data-dueprog="${due}" data-start="${tr.startAt}" style="width:${pct}%"></i></div>
@@ -984,10 +1055,11 @@ function activeCard({tr, l, due}){
   </div>`;
 }
 function renderJobs(mode="truck"){
-  const rail = mode==="rail", kp = rail ? "jr-" : "jt-";
+  const kind = mode, rail = kind==="rail", air = kind==="air", kp = rail ? "jr-" : air ? "ja-" : "jt-";
+  if(air && level() < AIR_LVL) return `<section class="sec"><h2>Air cargo jobs</h2><div class="card dim"><div class="row"><b>Air cargo unlocks at level ${AIR_LVL}</b><span class="lock">Level ${AIR_LVL}</span></div><p class="hint">Fly urgent freight between real US airports, Pocket Planes style. You are level ${level()}.</p></div></section>`;
   if(rail && level() < RAIL_LVL) return `<section class="sec"><h2>Train jobs</h2><div class="card dim"><div class="row"><b>Trains unlock at level ${RAIL_LVL}</b><span class="lock">Level ${RAIL_LVL}</span></div><p class="hint">Run trains between real freight yards on real track. You are level ${level()}.</p></div></section>`;
-  const sj = S.jobs.find(j=>j.id===selectedJob && !!j.rail===rail);
-  const list = S.jobs.filter(j=>!!j.rail===rail).map(j=>({j,can:jobStatus(j).can})).sort((a,b)=>(b.can-a.can)||(b.j.pay-a.j.pay));
+  const sj = S.jobs.find(j=>j.id===selectedJob && jobKind(j)===kind);
+  const list = S.jobs.filter(j=>jobKind(j)===kind).map(j=>({j,can:jobStatus(j).can})).sort((a,b)=>(b.can-a.can)||(b.j.pay-a.j.pay));
   const can = list.filter(x=>x.can), cant = list.filter(x=>!x.can);
   let h = "";
   if(sj) h += dispatchCard(sj);
@@ -996,22 +1068,24 @@ function renderJobs(mode="truck"){
     if(!trains.length) h += `<p class="hint" style="color:var(--ink)">You have no trains yet. Buy a locomotive in <b>Menu → Shop</b>, add railcars in the <b>Fleet</b> tab, and hire an engineer in <b>Menu → Crew</b>.</p>`;
     h += `<p class="hint">Rail jobs run between real freight yards (square markers on the map).</p>`;
   }
-  if(!rail && S.jobsDone<1 && !sj) h += `<p class="hint" style="color:var(--ink)">Tap an orange pin on the map, or pick a job below, then send your van. Gray pins need a vehicle you do not own yet.</p>`;
-  h += rail ? `<p class="hint">Train job board: ${railCount()} of ${maxRailJobs()} (one more than your ${S.vehicles.filter(isTrain).length} train${S.vehicles.filter(isTrain).length===1?"":"s"}). A new one posts every ${JOB_EVERY_MS/1000} seconds.</p>` : `<p class="hint">Truck job board: ${boardCount()} of ${maxJobs()} (one more than your ${trucks().length} truck${trucks().length===1?"":"s"}). A new one posts every ${JOB_EVERY_MS/1000} seconds.</p>`;
-  { const active = activeLoads(rail);
+  if(air){
+    const planes = S.vehicles.filter(isPlane);
+    if(!planes.length) h += `<p class="hint" style="color:var(--ink)">You have no planes yet. Buy one in <b>Menu → Shop</b> and hire a pilot in <b>Menu → Crew</b>.</p>`;
+    h += `<p class="hint">Air cargo flies between real US airports (round markers on the map). Bigger aircraft need bigger airports.</p>`;
+  }
+  if(kind==="truck" && S.jobsDone<1 && !sj) h += `<p class="hint" style="color:var(--ink)">Tap an orange pin on the map, or pick a job below, then send your van. Gray pins need a vehicle you do not own yet.</p>`;
+  h += air ? `<p class="hint">Air cargo job board: ${airCount()} of ${maxAirJobs()} (one more than your ${S.vehicles.filter(isPlane).length} plane${S.vehicles.filter(isPlane).length===1?"":"s"}). A new one posts every ${JOB_EVERY_MS/1000} seconds.</p>` : rail ? `<p class="hint">Train job board: ${railCount()} of ${maxRailJobs()} (one more than your ${S.vehicles.filter(isTrain).length} train${S.vehicles.filter(isTrain).length===1?"":"s"}). A new one posts every ${JOB_EVERY_MS/1000} seconds.</p>` : `<p class="hint">Truck job board: ${boardCount()} of ${maxJobs()} (one more than your ${trucks().length} truck${trucks().length===1?"":"s"}). A new one posts every ${JOB_EVERY_MS/1000} seconds.</p>`;
+  { const active = activeLoads(kind);
     if(active.length) h += `<section class="sec ${cz(kp+"active")}">${secHead(kp+"active","In progress",`<span class="hint num">${active.length}</span>`)}<div class="list">${active.map(a=>activeCard(a)).join("")}</div></section>`; }
-  h += `<section class="sec ${cz(kp+"ready")}">${secHead(kp+"ready","Ready to run",`<span class="hint num">${can.length}</span>`)}${can.length?`<div class="list">${can.map(x=>jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. ${rail?"A new train job posts every 30 seconds.":"A new job posts every 30 seconds."}</p>`}</section>`;
+  h += `<section class="sec ${cz(kp+"ready")}">${secHead(kp+"ready","Ready to run",`<span class="hint num">${can.length}</span>`)}${can.length?`<div class="list">${can.map(x=>jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. A new job posts every 30 seconds.</p>`}</section>`;
   if(cant.length) h += `<section class="sec ${cz(kp+"other")}">${secHead(kp+"other","Other jobs nearby",`<span class="hint num">${cant.length}</span>`)}<div class="list">${cant.map(x=>jobCard(x.j)).join("")}</div></section>`;
   return h;
-}
-function renderAir(){
-  return `<section class="sec"><h2>Air cargo jobs</h2><div class="card dim"><div class="row"><b>Air cargo is coming</b><span class="lock">Level 20</span></div><p class="hint">Unlock airports and fly urgent freight between them, Pocket Planes style. Planes will show up here once air cargo is built.</p></div></section>`;
 }
 function stopName(tr, sk, jid){ const j = tr.loads.find(l=>l.job.id===jid)?.job; if(!j) return ""; return sk==="pick" ? (j.from.name||j.from.biz) : (j.to.name||j.to.biz); }
 function phaseText(tr,t){
   const sg = segAt(tr,t);
   if(sg.kind==="stop") return sg.sk==="pick" ? `Loading at ${stopName(tr,"pick",sg.jid)}` : `Unloading at ${stopName(tr,"drop",sg.jid)}`;
-  if(sg.ph==="ret") return tr.loads.length && tr.loads[0].job.rail ? "Returning to its yard · can take more jobs" : "Returning to hub · can take more jobs";
+  if(sg.ph==="ret"){ const v = S.vehicles.find(x=>x.id===tr.v); return v && isPlane(v) ? "Flying home · can take more jobs" : v && isTrain(v) ? "Returning to its yard · can take more jobs" : "Returning to hub · can take more jobs"; }
   const on = openLoads(tr).filter(l=>l.picked).length;
   return sg.next?.sk==="pick" ? `${on?`${on} on board · `:""}To pickup at ${stopName(tr,"pick",sg.next.jid)}` : `${on} on board · Delivering to ${stopName(tr,"drop",sg.next?.jid)}`;
 }
@@ -1047,6 +1121,12 @@ function renderFleet(){
     h += `</div></div>`;
   }
   h += `</div></section>`;
+  const planes = S.vehicles.filter(isPlane);
+  if(planes.length){
+    h += `<section class="sec ${cz("f-planes")}">${secHead("f-planes","Planes",`<span class="hint num">${planes.length} · ${planes.filter(v=>tripOf(v)).length} in the air</span>`)}<div class="list">`;
+    for(const v of planes) h += planeCard(v, t);
+    h += `</div></section>`;
+  }
   const trains = S.vehicles.filter(isTrain);
   if(trains.length){
     h += `<section class="sec ${cz("f-trains")}">${secHead("f-trains","Trains",`<span class="hint num">${trains.length} · ${trains.filter(v=>tripOf(v)).length} on the road</span>`)}<div class="list">`;
@@ -1074,6 +1154,35 @@ function trainCard(v, t){
   h += `<div class="btnrow"><button class="btn ghost sm" data-act="askRen" data-id="${v.id}">Rename</button>${!tr&&!confirm?`<button class="btn ghost sm" data-act="askSell" data-id="${v.id}">Sell</button>`:""}${confirm?`<button class="btn warn sm" data-act="sell" data-id="${v.id}">Sell train for ${money(vehValue(v)*0.6)}</button><button class="btn ghost sm" data-act="cancel">Keep it</button>`:""}</div>
     ${pendingConfirm===("ren"+v.id)?`<div class="btnrow"><input type="text" id="ren-${v.id}" maxlength="24" value="${esc(v.n)}" aria-label="New name for ${esc(v.n)}" style="flex:1;min-width:0;width:auto"><button class="btn sm" data-act="ren" data-id="${v.id}">Save</button><button class="btn ghost sm" data-act="cancel">Cancel</button></div>`:""}</div>`;
   return h;
+}
+function planeCard(v, t){
+  const ty = TYPE[v.type], tr = tripOf(v), a = AIRPORT[v.airport];
+  let h = `<div class="card"><div class="row"><b><span class="vic">${iconSvg("plane",13)}</span>${esc(v.n)}</b><span class="status ${tr?"busy":"idle"}" ${tr?`data-ph="${tr.id}"`:""}>${tr?esc(phaseText(tr,t)):"On the ground"}</span></div>
+    <div class="meta"><span>${esc(ty.n)}</span><span>Home: ${esc(a.id)} ${esc(a.city)} ${a.s}</span><span class="num">${ty.cap.toLocaleString("en-US")} lb</span><span class="num">${ty.leg.toLocaleString("en-US")} mi range</span><span>${ty.lic==="pilot2"?"2 pilots":"1 pilot"}</span><span class="num">${Math.round(v.miles||0).toLocaleString("en-US")} mi lifetime</span></div>`;
+  if(tr){
+    const pct = Math.min(100,(t-tr.startAt)/((tr.endAt-tr.startAt)||1)*100), ns = nextStopAt(tr,t);
+    h += `<div class="prog"><i data-prog="${tr.id}" style="width:${pct}%"></i></div>
+      <ul class="loads">${tr.loads.map(l=>`<li class="${l.delivered?"done":""}"><span>${esc(l.job.from.airport)} <span class="arrow">→</span> ${esc(l.job.to.airport)} · ${esc(CARGO[l.job.cargo].n)}</span><span class="num">${weightStr(l.job)}</span><span class="lst">${l.delivered?"Last delivered":l.picked?"On board":"Waiting for pickup"}</span><span class="num">${money(l.job.pay*(1-(l.cut||0)))}</span></li>`).join("")}</ul>
+      <div class="meta"><span>${ns.label} <span class="num" data-eta="${tr.id}">${dur(ns.t-t)}</span></span><span class="num">${roomStr(ty, usedRoom(tr))} booked</span></div>
+      <div class="btnrow"><button class="btn ghost sm" data-act="follow" data-id="${tr.id}">Follow on map</button></div>`;
+  }
+  const confirm = pendingConfirm===("sell"+v.id);
+  h += `<div class="btnrow"><button class="btn ghost sm" data-act="askRen" data-id="${v.id}">Rename</button>${!tr&&!confirm?`<button class="btn ghost sm" data-act="askSell" data-id="${v.id}">Sell</button>`:""}${confirm?`<button class="btn warn sm" data-act="sell" data-id="${v.id}">Sell plane for ${money(vehValue(v)*0.6)}</button><button class="btn ghost sm" data-act="cancel">Keep it</button>`:""}</div>
+    ${pendingConfirm===("ren"+v.id)?`<div class="btnrow"><input type="text" id="ren-${v.id}" maxlength="24" value="${esc(v.n)}" aria-label="New name for ${esc(v.n)}" style="flex:1;min-width:0;width:auto"><button class="btn sm" data-act="ren" data-id="${v.id}">Save</button><button class="btn ghost sm" data-act="cancel">Cancel</button></div>`:""}</div>`;
+  return h;
+}
+function airportOptions(minSize){
+  const hubs = S.bases.map(basePt);
+  return AIRPORTS.filter(a=>a.size>=minSize).map(a=>({a, d:Math.round(Math.min(...hubs.map(h=>hav(h,a))))})).sort((x,y)=>x.d-y.d)
+    .map(({a,d})=>`<option value="${a.id}">${a.id} · ${esc(a.n)}, ${esc(a.city)} ${a.s} · ${d} mi from your nearest hub</option>`).join("");
+}
+function renderPlaneShop(L_){
+  if(L_ < AIR_LVL) return `<div class="card dim"><div class="row"><b>Planes</b><span class="lock">Level ${AIR_LVL}</span></div><p class="hint">Fly urgent freight between real US airports.</p></div>`;
+  return `<p class="hint">Planes fly between real US airports. Each plane needs pilots (Menu → Crew). Regional jets and bigger only use mid-size airports or major cargo hubs.</p>
+    ${PLANES.map(p=>{ const locked = p.lvl>L_, poor = S.cash<p.price;
+      return `<div class="card ${locked?"dim":""}"><div class="row"><b><span class="vic">${iconSvg("plane",13)}</span>${esc(p.n)}</b><span class="num">${money(p.price)}</span></div>
+        <div class="meta"><span class="num">${p.cap.toLocaleString("en-US")} lb</span><span class="num">${p.leg.toLocaleString("en-US")} mi range</span><span>${p.lic==="pilot2"?"2 pilots":"1 pilot"}</span><span>${p.minSize===1?"Any airport":p.minSize===2?"Mid-size airports and up":"Major cargo hubs only"}</span></div>
+        ${locked?`<span class="lock">Unlocks at level ${p.lvl}</span>`:`<div class="btnrow"><select id="pa-${p.id}" aria-label="Home airport for ${esc(p.n)}" style="flex:1;min-width:0;width:auto">${airportOptions(p.minSize)}</select><button class="btn sm" data-act="buyPlane" data-id="${p.id}" ${poor?"disabled":""}>${poor?"Not enough cash":"Buy"}</button></div>`}</div>`; }).join("")}`;
 }
 function yardOptions(){
   const hubs = S.bases.map(basePt);
@@ -1123,8 +1232,7 @@ function renderShop(){
       <div class="btnrow">${!nx?`<span class="lock">Largest size</span>`:nx.lvl>L_?`<span class="lock">${nx.n} (${nx.cap} vehicles) unlocks at level ${nx.lvl}</span>`:`<button class="btn ghost sm" data-act="slot" data-id="${b.id}" ${S.cash<nx.price?"disabled":""}>Upgrade to ${nx.n} (${nx.cap} vehicles) · ${money(nx.price)}</button>`}</div></div>`;}).join("")}
   </section>
   <section class="sec ${cz("trains")}">${secHead("trains","Trains")}${renderTrainShop(L_)}</section>
-  <section class="sec ${cz("next")}">${secHead("next","Coming next")}
-    <div class="card dim"><div class="row"><b>Air cargo</b><span class="lock">Level 20</span></div><p class="hint">Unlock airports and fly urgent freight between them, Pocket Planes style.</p></div></section>`;
+  <section class="sec ${cz("planes")}">${secHead("planes","Planes")}${renderPlaneShop(L_)}</section>`;
   return h;
 }
 function renderCrew(){
@@ -1136,6 +1244,8 @@ function renderCrew(){
       ${L_<6?`<span class="lock">Unlocks at level 6</span>`:`<div class="btnrow"><button class="btn sm" data-act="hire" data-kind="cdl" ${S.cash<5000?"disabled":""}>Hire CDL driver</button></div>`}</div>
     <div class="card ${L_<RAIL_LVL?"dim":""}"><div class="row"><b>Engineer</b><span class="num">${money(ENGINEER.fee)}</span></div><p class="hint">Drives one train. One-time hiring fee, no cut of the pay.</p>
       ${L_<RAIL_LVL?`<span class="lock">Unlocks at level ${RAIL_LVL}</span>`:`<div class="btnrow"><button class="btn sm" data-act="hire" data-kind="eng" ${S.cash<ENGINEER.fee?"disabled":""}>Hire engineer</button></div>`}</div>
+    <div class="card ${L_<AIR_LVL?"dim":""}"><div class="row"><b>Pilot</b><span class="num">${money(PILOT.fee)}</span></div><p class="hint">Flies planes. Prop planes and turboprops need 1 pilot; jets need 2. One-time hiring fee, no cut of the pay.</p>
+      ${L_<AIR_LVL?`<span class="lock">Unlocks at level ${AIR_LVL}</span>`:`<div class="btnrow"><button class="btn sm" data-act="hire" data-kind="pilot" ${S.cash<PILOT.fee?"disabled":""}>Hire pilot</button></div>`}</div>
   </section>
   <section class="sec ${cz("c-drivers")}">${secHead("c-drivers","Drivers",`<span class="hint num">${S.drivers.length} · ${S.drivers.filter(d=>!d.busy).length} free</span>`)}<div class="list">`;
   for(const d of S.drivers){
@@ -1218,7 +1328,8 @@ function renderHeader(){
   $("#hdrLvl").textContent = `Level ${L_} · ${Math.floor(S.xp-a).toLocaleString("en-US")}/${(b-a).toLocaleString("en-US")} XP`;
   $("#hdrXp").style.width = (L_>=50?100:Math.min(100,(S.xp-a)/(b-a)*100)) + "%";
   $("#hdrTrips").textContent = S.trips.length;
-  $("#jobBadge").textContent = S.jobs.filter(j=>!j.rail && jobStatus(j).can).length;
+  $("#jobBadge").textContent = S.jobs.filter(j=>jobKind(j)==="truck" && jobStatus(j).can).length;
+  const ac = S.jobs.filter(j=>j.air && jobStatus(j).can).length, ab = $("#airBadge"); ab.textContent = ac; ab.hidden = !ac;
   const rc = S.jobs.filter(j=>j.rail && jobStatus(j).can).length, rb = $("#railBadge"); rb.textContent = rc; rb.hidden = !rc;
   const cc = claimableCount(); for(const id of ["#taskBadge","#taskBadge2"]){ const tb = $(id); tb.textContent = cc; tb.hidden = !cc; }
 }
@@ -1226,7 +1337,7 @@ function renderPanel(){
   if(!S) return;
   const body = $("#panelBody"), st = body.scrollTop;
   const ae = document.activeElement, keep = ae && ae.id && body.contains(ae) && ae.tagName==="INPUT" ? {id:ae.id, v:ae.value, a:ae.selectionStart, b:ae.selectionEnd} : null;
-  body.innerHTML = tab==="jobs"?renderJobs("truck"):tab==="rail"?renderJobs("rail"):tab==="air"?renderAir():tab==="fleet"?renderFleet():tab==="shop"?renderShop():tab==="crew"?renderCrew():tab==="log"?renderLog():tab==="tasks"?renderTasks():tab==="settings"?renderSettings():renderCompany();
+  body.innerHTML = tab==="jobs"?renderJobs("truck"):tab==="rail"?renderJobs("rail"):tab==="air"?renderJobs("air"):tab==="fleet"?renderFleet():tab==="shop"?renderShop():tab==="crew"?renderCrew():tab==="log"?renderLog():tab==="tasks"?renderTasks():tab==="settings"?renderSettings():renderCompany();
   body.scrollTop = st;
   if(keep){ const el = document.getElementById(keep.id); if(el){ el.value = keep.v; el.focus(); try{ el.setSelectionRange(keep.a, keep.b); }catch(_){} } }
   renderHeader();
@@ -1293,6 +1404,14 @@ $("#panelBody").addEventListener("click", e=>{
     S.cash -= l.price; const n = S.vehicles.filter(isTrain).length + 1;
     S.vehicles.push({id:nid("v"), type:l.id, yard:y, cars:{}, n:`Train ${n}`, busy:false, jobs:0, miles:0});
     toast(`Bought a ${esc(l.n.toLowerCase())} at ${esc(YARD[y].n)}. Add railcars in the Fleet tab${S.drivers.some(d=>d.kind==="eng")?"":" and hire an engineer"}.`, 6000);
+    drawYards(); save(); refresh(); return;
+  }
+  if(a==="buyPlane"){
+    const p = TYPE[id], ap = $("#pa-"+id)?.value; if(!p || !AIRPORT[ap] || S.cash < p.price || level() < p.lvl) return;
+    S.cash -= p.price; const n = S.vehicles.filter(isPlane).length + 1;
+    S.vehicles.push({id:nid("v"), type:p.id, airport:ap, n:`Plane ${n}`, busy:false, jobs:0, miles:0});
+    const pilots = S.drivers.filter(d=>d.kind==="pilot").length, need = p.lic==="pilot2" ? 2 : 1;
+    toast(`Bought a ${esc(p.n.toLowerCase())} at ${esc(AIRPORT[ap].n)}.${pilots<need?` Hire ${need===2?"2 pilots":"a pilot"} in Menu → Crew to fly it.`:""}`, 6000);
     drawYards(); save(); refresh(); return;
   }
   if(a==="addCar"){
@@ -1455,11 +1574,11 @@ function start(){
     S.bases.forEach((b,i)=>{ if(b.tier==null) b.tier=0; delete b.slots; if(!b.name) b.name = b.home ? "HQ" : `Hub ${i+1}`; });
     S.jobs = S.jobs.filter(fitsUnlocked);
     // Boards posted under older, larger limits: keep the best jobs up to today's limit (runnable first, then highest pay).
-    for(const [isRail, cap] of [[false, maxJobs()], [true, maxRailJobs()]]){
-      const mine = S.jobs.filter(j=>!!j.rail===isRail);
+    for(const [kind, cap] of [["truck", maxJobs()], ["rail", maxRailJobs()], ["air", maxAirJobs()]]){
+      const mine = S.jobs.filter(j=>jobKind(j)===kind);
       if(mine.length <= cap) continue;
       const keep = new Set(mine.sort((a,b)=>(jobStatus(b).can-jobStatus(a).can)||(b.pay-a.pay)).slice(0,cap));
-      S.jobs = S.jobs.filter(j=>!!j.rail!==isRail || keep.has(j));
+      S.jobs = S.jobs.filter(j=>jobKind(j)!==kind || keep.has(j));
     }
     S.jobs.forEach(j=>{ j.pay = jobPay(j); if(j.urg==="standard") j.expires=null; if(!j.from.name){ j.from.name=bizName(j.from.biz); j.from.num=houseNo(); j.to.name=bizName(j.to.biz); j.to.num=houseNo(); } });
     const dt = Date.now() - S.lastReal; let log = null;

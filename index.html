@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
-<link rel="stylesheet" href="style.css?v=48">
+<link rel="stylesheet" href="style.css?v=49">
 <style>html{color-scheme:light}body{margin:0}:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}[hidden]{display:none!important}</style>
 </head>
 <body>
@@ -69,6 +69,7 @@
         <span><i style="background:#c8372a;border-radius:2px"></i>D drop-off</span>
         <span><i style="background:#7b3fb5"></i>Event load</span>
         <span><i style="background:#3a4a63;border-radius:2px"></i>Rail yard / rail job</span>
+        <span><i style="background:#1b7fbf"></i>Airport / air job</span>
       </div>
     </div>
     <div class="maptools">
@@ -85,7 +86,7 @@
     <nav class="tabs">
       <button class="tab" data-tab="jobs">Truck jobs<span class="badge" id="jobBadge">0</span></button>
       <button class="tab" data-tab="rail">Train jobs<span class="badge" id="railBadge" hidden>0</span></button>
-      <button class="tab" data-tab="air">Air cargo jobs</button>
+      <button class="tab" data-tab="air">Air cargo jobs<span class="badge" id="airBadge" hidden>0</span></button>
     </nav>
     <div id="panelBody"></div>
   </aside>
@@ -120,7 +121,7 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-<script src="data.js?v=48"></script>
-<script src="game.js?v=48"></script>
+<script src="data.js?v=49"></script>
+<script src="game.js?v=49"></script>
 </body>
 </html>
