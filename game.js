@@ -108,8 +108,11 @@ const nid = p => p + (++S.idc);
 const level = () => levelOf(S.xp);
 const baseById = id => S.bases.find(b=>b.id===id);
 const hubCap = b => HUB_TIERS[b.tier||0].cap;
-const maxJobs = () => S.vehicles.length + 1;
-const boardCount = () => S.jobs.filter(j=>!j.locked).length;
+// Each kind of vehicle has its own job board: one more job than you have of that kind.
+const maxJobs = () => trucks().length + 1;
+const boardCount = () => S.jobs.filter(j=>!j.rail).length;
+const maxRailJobs = () => S.vehicles.filter(isTrain).length + 1;
+const railCount = () => S.jobs.filter(j=>j.rail).length;
 /* ---------------- Rail helpers ---------------- */
 const isTrain = v => TYPE[v.type]?.mode==="train";
 const trucks = () => S.vehicles.filter(v=>!isTrain(v));
@@ -163,8 +166,6 @@ async function reverseGeocode(p){
 const citiesNear = (ci, maxMi) => CITIES.filter(c=>roadMi(ci,c.i)<=maxMi).map(c=>c.i);
 function spawnJob(base, depth=0){
   const L = level();
-  const trains = S.vehicles.filter(isTrain), railOpen = S.jobs.some(x=>x.rail && !x.locked && trains.some(v=>vehicleFor(v,x).ok || tripOf(v)));
-  if(L>=RAIL_LVL && depth===0 && ((trains.length && !railOpen) || Math.random() < (trains.length ? 0.35 : 0.15))){ const rj = spawnRailJob(base); if(rj) return rj; }
   const ownedTypes = [...new Set(trucks().map(v=>v.type))];
   const reach = TYPES.filter(t=>t.lvl<=L);   // only vehicles you can already buy
   // Keep the board useful: while fewer jobs fit your fleet than you have vehicles, only post jobs you can run.
@@ -242,7 +243,7 @@ function routeJob(j){
       if(r.names){ j.from.street = r.names[0]; j.to.street = r.names[1]; }
       const m = jobMarkers.get(j.id); if(m) m.setLatLng([j.from.lat, j.from.lon]);
       // Real road miles can run past what any unlocked vehicle can reach; swap it for a new job.
-      if(!fitsUnlocked(j)){ S.jobs = S.jobs.filter(x=>x!==j); if(selectedJob===j.id) selectedJob=null; spawnJob(pick(S.bases)); drawJobs(); renderPanel(); return; }
+      if(!fitsUnlocked(j)){ S.jobs = S.jobs.filter(x=>x!==j); if(selectedJob===j.id) selectedJob=null; (j.rail ? spawnRailJob : spawnJob)(pick(S.bases)); drawJobs(); renderPanel(); return; }
     }
     if(j.id===selectedJob) drawSelection();
     if(tab==="jobs"||tab==="rail") renderPanel();
@@ -467,11 +468,12 @@ function logic(){
   if(S.jobs.length!==n0) changed = true;
   // Mission Chief style: one new job every 30 seconds, up to one more than your vehicle count.
   // An empty board refills right away so there is always something to do.
-  // A train with nothing to do gets a rail job right away (at most one every 10 seconds), even on a full board.
-  if(level()>=RAIL_LVL && S.clock >= (S.nextRailAt||0) && S.vehicles.some(v=>isTrain(v) && !tripOf(v)) && !S.jobs.some(x=>x.rail && !x.locked)){
-    S.nextRailAt = S.clock + 10000; const rj = spawnRailJob(pick(S.bases));
+  // Train jobs: their own board, one more than your number of trains, a new one every 30 seconds.
+  if(level()>=RAIL_LVL && railCount() < maxRailJobs() && S.clock >= (S.nextRailAt||0)){
+    const rj = spawnRailJob(pick(S.bases)); S.nextRailAt = S.clock + (railCount()<=1 ? 5000 : JOB_EVERY_MS);
     if(rj){ changed = true; if(!simulating && !awayLog) toast(`New rail job: <b>${esc(rj.from.name)}</b> to ${esc(rj.to.name)} · <span class="num">${money(rj.pay)}</span>`, 3500); }
   }
+  // Truck jobs: one more than your number of trucks.
   if(boardCount() < maxJobs() && (boardCount()===0 || S.clock >= (S.nextJobAt||0))){
     const j = spawnJob(pick(S.bases)); S.nextJobAt = S.clock + JOB_EVERY_MS; changed = true;
     if(j && !simulating && !awayLog) toast(`New ${j.event?esc(j.item.toLowerCase())+" ":""}job: <b>${esc(j.from.name)}</b> in ${esc(cityName(j.from.c))} · <span class="num">${money(j.pay)}</span>`, 3000);
@@ -974,8 +976,8 @@ function renderJobs(mode="truck"){
     h += `<p class="hint">Rail jobs run between real freight yards (square markers on the map).</p>`;
   }
   if(!rail && S.jobsDone<1 && !sj) h += `<p class="hint" style="color:var(--ink)">Tap an orange pin on the map, or pick a job below, then send your van. Gray pins need a vehicle you do not own yet.</p>`;
-  if(!rail) h += `<p class="hint">Board: ${boardCount()} of ${maxJobs()} jobs. A new one posts every ${JOB_EVERY_MS/1000} seconds.</p>`;
-  h += `<section class="sec"><div class="sec-head"><h2>Ready to run</h2><span class="hint num">${can.length}</span></div>${can.length?`<div class="list">${can.map(x=>jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. ${rail?"A new rail job posts as soon as a train is free.":"A new job posts every 30 seconds."}</p>`}</section>`;
+  h += rail ? `<p class="hint">Train job board: ${railCount()} of ${maxRailJobs()} (one more than your ${S.vehicles.filter(isTrain).length} train${S.vehicles.filter(isTrain).length===1?"":"s"}). A new one posts every ${JOB_EVERY_MS/1000} seconds.</p>` : `<p class="hint">Truck job board: ${boardCount()} of ${maxJobs()} (one more than your ${trucks().length} truck${trucks().length===1?"":"s"}). A new one posts every ${JOB_EVERY_MS/1000} seconds.</p>`;
+  h += `<section class="sec"><div class="sec-head"><h2>Ready to run</h2><span class="hint num">${can.length}</span></div>${can.length?`<div class="list">${can.map(x=>jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. ${rail?"A new train job posts every 30 seconds.":"A new job posts every 30 seconds."}</p>`}</section>`;
   if(cant.length) h += `<section class="sec"><div class="sec-head"><h2>Other jobs nearby</h2><span class="hint num">${cant.length}</span></div><div class="list">${cant.map(x=>jobCard(x.j)).join("")}</div></section>`;
   return h;
 }
