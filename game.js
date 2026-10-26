@@ -596,7 +596,7 @@ function renderCompany(){
       <tr><td>Next unlock</td><td style="font-family:var(--body)">${esc(Object.entries(UNLOCKS).find(([k])=>+k>L_)?.[1]||"All unlocked")}</td></tr>
       <tr><td>Deliveries</td><td>${S.jobsDone.toLocaleString("en-US")}</td></tr>
       <tr><td>Earned after driver pay</td><td>${money(S.earned)}</td></tr>
-      <tr><td>Garages</td><td>${S.bases.length}</td></tr>
+      <tr><td>Hubs</td><td>${S.bases.length}</td></tr>
       <tr><td>Home state</td><td style="font-family:var(--body)">${STATES[S.homeState]}</td></tr>
     </tbody></table></section>
     <section class="sec"><h3>Goals</h3><ul class="goals">${goals().map(x=>`<li class="${x[1]?"done":""}">${esc(x[0])}</li>`).join("")}</ul></section>
@@ -683,7 +683,7 @@ $("#panelBody").addEventListener("click", e=>{
     try{localStorage.removeItem(KEY);}catch(_){}
     S=null; selectedJob=null; pendingConfirm=null; following=null;
     [layerJobs,layerBases,layerRings,layerVeh,layerRoutes,layerSel,layerStops].forEach(l=>l.clearLayers()); stopMarkers.clear(); jobMarkers.clear(); vehMarkers.clear(); tripLines.clear();
-    $("#panelBody").innerHTML=""; endPlacement(); showStart(); return;
+    $("#panelBody").innerHTML=""; $("#hdrCash").textContent="$50,000"; $("#hdrLvl").textContent="Level 1"; $("#hdrXp").style.width="0%"; $("#hdrTrips").textContent="0"; $("#jobBadge").textContent="0"; $("#hdrCo").textContent="New company"; endPlacement(); showStart(); return;
   }
 });
 $("#panelBody").addEventListener("keydown", e=>{ if(e.key==="Enter" && e.target.id?.startsWith("ren-")){ e.preventDefault(); $(`[data-act=ren][data-id="${e.target.id.slice(4)}"]`)?.click(); }
@@ -765,7 +765,7 @@ function buildHub(){
   if(p.first){
     endPlacement();
     newGame(p.co, p.state, {pt:p.pt, addr:p.info.line, name, city});
-    afterLoad();
+    tab = "jobs"; afterLoad();
     map.flyTo([p.pt.lat,p.pt.lon], 11, {duration:1});
     toast(`${esc(name)} is open at ${esc(p.info.line)}. ${esc(S.drivers[0].name)} is waiting with your van.`, 6000);
     save(); return;
