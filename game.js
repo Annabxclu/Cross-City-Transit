@@ -158,7 +158,8 @@ function spawnJob(base, depth=0){
   const urg = Math.random()<0.07?"express":Math.random()<0.2?"priority":"standard";
   const life = urg==="express"? rnd(6,9)*MIN : urg==="priority"? rnd(12,18)*MIN : rnd(30,60)*MIN;
   const j = {id:nid("j"), base:base.id, cargo, weight, miles, urg, from, to, posted:S.clock, expires: urg==="standard" ? null : S.clock+life, routed:false};
-  j.pay = payFor(miles, weight, cargo, urg);
+  maybeEventJob(j);
+  j.pay = jobPay(j);
   S.jobs.push(j);
   if(!simulating) routeJob(j);
   return j;
@@ -174,7 +175,7 @@ function routeJob(j){
     if(!S || !S.jobs.includes(j)) return;
     j.routed = true;
     if(r){
-      j.miles = Math.max(1, Math.round(r.mi)); j.sec = r.sec; j.path = r.path; j.pay = payFor(j.miles, j.weight, j.cargo, j.urg);
+      j.miles = Math.max(1, Math.round(r.mi)); j.sec = r.sec; j.path = r.path; j.pay = jobPay(j);
       if(r.locs && r.locs.length===2){ Object.assign(j.from, r.locs[0]); Object.assign(j.to, r.locs[1]); }
       if(r.names){ j.from.street = r.names[0]; j.to.street = r.names[1]; }
       const m = jobMarkers.get(j.id); if(m) m.setLatLng([j.from.lat, j.from.lon]);
@@ -260,6 +261,7 @@ function dispatch(j, v, viaDispatcher){
            mkSeg("load",[[D.lat,D.lon]],c,d), mkSeg("ret",straight(D,B),d,e) ],
     deadMi:p.dead, haulMi:j.miles, retMi:p.back, deliverAt:d, endAt:e, gross:Math.round(j.pay*p.bonus), cut:p.cut+(viaDispatcher?0.05:0), delivered:false, auto:!!viaDispatcher};
   S.trips.push(trip);
+  recordDispatch(viaDispatcher);
   v.busy = true; r.drivers.forEach(x=>x.busy=true);
   S.jobs = S.jobs.filter(x=>x.id!==j.id);
   if(!simulating) roadTrip(trip);
@@ -283,6 +285,7 @@ function deliver(tr){
   const net = tr.gross*(1-tr.cut)*S.payMult;
   const before = level();
   S.cash += net; S.earned += net; S.xp += tr.gross/100; S.jobsDone++;
+  recordDelivery(tr, net);
   const v = S.vehicles.find(x=>x.id===tr.v); if(v){ v.jobs++; v.miles=(v.miles||0)+(tr.deadMi||0)+(tr.haulMi||tr.job.miles||0); }
   tr.drivers.forEach(id=>{const d=S.drivers.find(x=>x.id===id); if(d){d.jobs++;}});
   if(awayLog){awayLog.jobs++; awayLog.net+=net; logEvent(`<b>${esc(v?v.n:"Truck")}</b> delivered ${esc(CARGO[tr.job.cargo].n.toLowerCase())} to ${esc(tr.job.to.name||cityName(tr.job.to.c))} <span class="num">+${money(net)}</span> (while you were away)`, simWhen());}
@@ -313,7 +316,7 @@ function logic(){
   // An empty board refills right away so there is always something to do.
   if(S.jobs.length < maxJobs() && (S.jobs.length===0 || S.clock >= (S.nextJobAt||0))){
     const j = spawnJob(pick(S.bases)); S.nextJobAt = S.clock + JOB_EVERY_MS; changed = true;
-    if(j && !simulating && !awayLog) toast(`New job: <b>${esc(j.from.name)}</b> in ${esc(cityName(j.from.c))} · <span class="num">${money(j.pay)}</span>`, 3000);
+    if(j && !simulating && !awayLog) toast(`New ${j.event?esc(j.item.toLowerCase())+" ":""}job: <b>${esc(j.from.name)}</b> in ${esc(cityName(j.from.c))} · <span class="num">${money(j.pay)}</span>`, 3000);
   }
   for(const b of S.bases){
     if(!b.dispatcher) continue;
@@ -332,6 +335,221 @@ function simulateAway(ms){
   S.payMult = 1; simulating = false;
   S.trips.forEach(roadTrip);
   const log = awayLog; awayLog = null; return log;
+}
+
+/* Freight Dispatch — daily login rewards, daily tasks and seasonal events.
+   Loaded before game.js. Dates use the player's local calendar day. */
+
+/* ---------------- Settings ---------------- */
+const LOGIN_REWARDS = [1000, 2000, 3000, 4000, 5000, 6000, 10000];   // day 1..7, then the week starts again
+const ALL_TASKS_BONUS = 3000;     // claim after finishing every daily task
+const EVENT_PAY_BONUS = 1.25;     // event loads pay 25% more
+const EVENT_SHARE = 0.35;         // share of new jobs that are event loads while an event runs
+
+/* Seasonal events repeat every year between these month-day dates (inclusive). */
+const EVENTS = [
+  {id:"halloween", n:"Halloween Haul", start:"10-20", end:"11-01", color:"#7b3fb5",
+   blurb:"Pumpkin patches, candy makers and costume shops need loads delivered before the big night.",
+   items:[
+     {item:"Pumpkins",           from:"Pumpkin Patch",       to:["Grocery Store","Fall Festival","Farmers Market"], heavy:true},
+     {item:"Halloween candy",    from:"Candy Factory",       to:["Grocery Store","Party Store","Trunk-or-Treat Lot"]},
+     {item:"Costumes",           from:"Costume Warehouse",   to:["Party Store","Costume Shop","Theater"]},
+     {item:"Decorations",        from:"Decoration Supplier", to:["Haunted House","Party Store","Fall Festival"]},
+     {item:"Hay bales",          from:"Hay Farm",            to:["Corn Maze","Fall Festival","Haunted House"], heavy:true},
+     {item:"Fog machines and props", from:"Stage Supply Co.", to:["Haunted House","Theater","Corn Maze"]},
+     {item:"Apple cider",        from:"Cider Mill",          to:["Fall Festival","Grocery Store","Farmers Market"]}
+   ],
+   milestones:[{n:5, reward:2500}, {n:15, reward:7500}, {n:30, reward:20000}, {n:50, reward:40000}]}
+];
+Object.assign(NAME_SUFFIX, {
+  "Pumpkin Patch":["Pumpkin Patch","Pumpkin Farm"], "Candy Factory":["Candy Co.","Confections","Sweets Factory"],
+  "Costume Warehouse":["Costume Warehouse","Costume Supply"], "Decoration Supplier":["Seasonal Decor","Party Supply"],
+  "Hay Farm":["Hay Farm","Hay & Feed"], "Cider Mill":["Cider Mill","Orchard Cider"],
+  "Grocery Store":["Market","Grocery","Fresh Market"], "Fall Festival":["Fall Festival","Harvest Fest"],
+  "Farmers Market":["Farmers Market"], "Party Store":["Party Store","Party City Outlet"],
+  "Trunk-or-Treat Lot":["Church Trunk-or-Treat","Community Trunk-or-Treat"], "Costume Shop":["Costume Shop","Costumes"],
+  "Theater":["Playhouse","Community Theater"], "Haunted House":["Haunted House","Scream Park","Haunted Manor"],
+  "Corn Maze":["Corn Maze","Maze & Hayride"]
+});
+
+/* ---------------- Dates ---------------- */
+const dayKey = (d=new Date()) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const dayBefore = key => { const [y,m,d] = key.split("-").map(Number); return dayKey(new Date(y, m-1, d-1)); };
+function msToMidnight(){ const n = new Date(), m = new Date(n.getFullYear(), n.getMonth(), n.getDate()+1); return m - n; }
+function activeEvent(d=new Date()){
+  const md = `${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  const ev = EVENTS.find(e => e.start <= e.end ? (md>=e.start && md<=e.end) : (md>=e.start || md<=e.end));
+  return ev ? {...ev, key:`${ev.id}-${d.getFullYear()}`} : null;
+}
+function eventEndsIn(ev){
+  const n = new Date(), [m,d] = ev.end.split("-").map(Number);
+  let end = new Date(n.getFullYear(), m-1, d+1);
+  if(end < n) end = new Date(n.getFullYear()+1, m-1, d+1);
+  return end - n;
+}
+function longDur(ms){ const h = Math.floor(ms/3600e3), d = Math.floor(h/24); return d>=1 ? `${d}d ${h%24}h` : `${h}h ${Math.floor(ms/60e3)%60}m`; }
+
+/* ---------------- Daily tasks ---------------- */
+const rewardScale = () => 1 + 0.2*(level()-1);
+const roundReward = n => Math.round(n*rewardScale()/100)*100;
+const TASK_POOL = [
+  {kind:"weight",  make:()=>({target: level()<5?15000:level()<10?60000:200000, reward:1500}), label:t=>`Deliver ${t.target.toLocaleString("en-US")} lb of freight`},
+  {kind:"miles",   make:()=>({target: level()<5?400:level()<10?1200:3000, reward:1500}),     label:t=>`Drive ${t.target.toLocaleString("en-US")} loaded miles`},
+  {kind:"urgent",  make:()=>({target:2, reward:1500}),                                        label:t=>`Complete ${t.target} priority or express jobs`},
+  {kind:"earn",    make:()=>({target: level()<5?2000:level()<10?15000:60000, reward:1000}),   label:t=>`Earn ${money(t.target)} from deliveries`},
+  {kind:"long",    make:()=>({target:1, reward:2000}),                                        label:t=>`Complete a long haul of 200+ miles`},
+  {kind:"dispatch",make:()=>({target:8, reward:1000}),                                        label:t=>`Dispatch ${t.target} jobs yourself`}
+];
+const TASK_LABEL = {
+  deliveries: t=>`Complete ${t.target} deliveries`,
+  event: t=>`Deliver ${t.target} ${activeEvent()?.n||"event"} loads`
+};
+function newDailyTasks(){
+  const tasks = [5,10,20].map((n,i)=>({kind:"deliveries", target:n, reward:roundReward([1000,2500,6000][i])}));
+  const pool = TASK_POOL.slice().sort(()=>Math.random()-0.5).slice(0,3);
+  pool.forEach(p=>{ const m = p.make(); tasks.push({kind:p.kind, target:m.target, reward:roundReward(m.reward)}); });
+  if(activeEvent()) tasks.push({kind:"event", target:3, reward:roundReward(2000)});
+  return tasks.map((t,i)=>({...t, id:"t"+i, progress:0, claimed:false}));
+}
+function taskLabel(t){
+  if(TASK_LABEL[t.kind]) return TASK_LABEL[t.kind](t);
+  return TASK_POOL.find(p=>p.kind===t.kind)?.label(t) || t.kind;
+}
+
+/* Called every tick: rolls the day over and starts a new event when the date changes. */
+function ensureDay(){
+  if(!S) return false;
+  const today = dayKey(); let changed = false;
+  if(!S.daily || S.daily.date !== today){
+    S.daily = {date: today, tasks: newDailyTasks(), bonusClaimed:false};
+    changed = true;
+  }
+  S.login ||= {lastClaim:null, streak:0};
+  S.events ||= {};
+  const ev = activeEvent();
+  if(ev && !S.events[ev.key]) { S.events[ev.key] = {count:0, claimed:[]}; changed = true; }
+  if(changed && typeof renderPanel==="function" && tab==="tasks") renderPanel();
+  return changed;
+}
+
+/* Called from deliver(): moves daily task and event progress forward. */
+function recordDelivery(tr, net){
+  ensureDay();
+  const j = tr.job, add = (kind, n) => S.daily.tasks.forEach(t=>{ if(t.kind===kind && !t.claimed) t.progress = Math.min(t.target, t.progress + n); });
+  add("deliveries", 1);
+  add("weight", j.cargo==="vehicles" ? j.weight*4000 : j.weight);
+  add("miles", tr.haulMi || j.miles || 0);
+  if(j.urg!=="standard") add("urgent", 1);
+  add("earn", Math.round(net));
+  if((j.miles||0) >= 200) add("long", 1);
+  if(j.event){
+    add("event", 1);
+    const e = S.events?.[j.event]; if(e) e.count++;
+  }
+}
+function recordDispatch(viaDispatcher){ if(!viaDispatcher){ ensureDay(); S.daily.tasks.forEach(t=>{ if(t.kind==="dispatch" && !t.claimed) t.progress = Math.min(t.target, t.progress+1); }); } }
+
+/* ---------------- Claiming ---------------- */
+function loginStatus(){
+  S.login ||= {lastClaim:null, streak:0};
+  const today = dayKey(), claimedToday = S.login.lastClaim === today;
+  const continuing = S.login.lastClaim === dayBefore(today);
+  const nextStreak = claimedToday ? S.login.streak : continuing ? S.login.streak + 1 : 1;
+  const dayIdx = (nextStreak - 1) % LOGIN_REWARDS.length;
+  return {claimedToday, streak: nextStreak, dayIdx, amount: LOGIN_REWARDS[dayIdx]};
+}
+function claimLogin(){
+  const st = loginStatus(); if(st.claimedToday) return 0;
+  S.login.lastClaim = dayKey(); S.login.streak = st.streak;
+  S.cash += st.amount;
+  toast(`Daily login reward · day ${st.dayIdx+1}: <span class="num">+${money(st.amount)}</span>`, 5000);
+  return st.amount;
+}
+function claimTask(id){
+  const t = S.daily.tasks.find(x=>x.id===id); if(!t || t.claimed || t.progress < t.target) return;
+  t.claimed = true; S.cash += t.reward;
+  toast(`Task done: ${esc(taskLabel(t))} <span class="num">+${money(t.reward)}</span>`, 4500);
+}
+const allTasksDone = () => S.daily.tasks.every(t=>t.claimed);
+function claimBonus(){
+  if(S.daily.bonusClaimed || !allTasksDone()) return;
+  const r = roundReward(ALL_TASKS_BONUS); S.daily.bonusClaimed = true; S.cash += r;
+  toast(`All daily tasks complete <span class="num">+${money(r)}</span>`, 5000);
+}
+function claimMilestone(n){
+  const ev = activeEvent(); if(!ev) return; const e = S.events[ev.key], m = ev.milestones.find(x=>x.n===n);
+  if(!e || !m || e.claimed.includes(n) || e.count < n) return;
+  e.claimed.push(n); S.cash += m.reward;
+  toast(`${esc(ev.n)}: ${n} loads delivered <span class="num">+${money(m.reward)}</span>`, 5000);
+}
+function claimableCount(){
+  if(!S || !S.daily) return 0;
+  let n = S.daily.tasks.filter(t=>!t.claimed && t.progress>=t.target).length;
+  if(!S.daily.bonusClaimed && allTasksDone()) n++;
+  if(!loginStatus().claimedToday) n++;
+  const ev = activeEvent(); if(ev && S.events?.[ev.key]){ const e = S.events[ev.key]; n += ev.milestones.filter(m=>e.count>=m.n && !e.claimed.includes(m.n)).length; }
+  return n;
+}
+
+/* ---------------- Event jobs ---------------- */
+// Turns a freshly posted job into an event load when an event is running.
+function maybeEventJob(j){
+  const ev = activeEvent(); if(!ev || Math.random() > EVENT_SHARE) return j;
+  if(!["general","parcels","pallets","furniture"].includes(j.cargo)) return j;
+  const it = pick(ev.items);
+  j.event = ev.key; j.item = it.item; j.evColor = ev.color;
+  j.from.biz = it.from; j.from.name = bizName(it.from);
+  j.to.biz = pick(it.to); j.to.name = bizName(j.to.biz);
+  return j;
+}
+const jobPay = j => Math.round(payFor(j.miles, j.weight, j.cargo, j.urg) * (j.event ? EVENT_PAY_BONUS : 1));
+
+/* ---------------- Tasks tab ---------------- */
+function bar(p, t, color){ return `<div class="prog"><i style="width:${Math.min(100, p/t*100)}%;${color?`background:${color}`:""}"></i></div>`; }
+function renderTasks(){
+  ensureDay();
+  const ls = loginStatus(), ev = activeEvent(), d = S.daily;
+  let h = `<section class="sec"><div class="sec-head"><h2>Daily login</h2><span class="hint">${ls.claimedToday?"Come back tomorrow":`Day ${ls.dayIdx+1} of 7`}</span></div>
+    <div class="streak">${LOGIN_REWARDS.map((a,i)=>{ const cur = ls.claimedToday ? (ls.streak-1)%7 : ls.dayIdx; const done = i<cur || (ls.claimedToday && i===cur);
+      return `<div class="sday ${done?"done":""} ${!ls.claimedToday&&i===cur?"now":""}"><span>Day ${i+1}</span><b class="num">${money(a)}</b></div>`; }).join("")}</div>
+    ${ls.claimedToday?`<p class="hint">Claimed today. Log in tomorrow for day ${(ls.dayIdx+1)%7+1} (${money(LOGIN_REWARDS[(ls.dayIdx+1)%7])}). Missing a day starts the week over.</p>`
+      :`<div class="btnrow"><button class="btn" data-act="claimLogin">Claim ${money(ls.amount)}</button><span class="hint">Missing a day starts the week over.</span></div>`}
+  </section>`;
+  if(ev){
+    const e = S.events[ev.key];
+    h += `<section class="sec event" style="--ev:${ev.color}"><div class="sec-head"><h2>${esc(ev.n)}</h2><span class="hint">ends in ${longDur(eventEndsIn(ev))}</span></div>
+      <p class="hint" style="color:var(--ink)">${esc(ev.blurb)} Event loads show as purple pins and pay 25% more.</p>
+      <div class="sec-head"><h3>Event loads delivered</h3><span class="num">${e.count}</span></div>
+      <div class="list">${ev.milestones.map(m=>{ const got = e.claimed.includes(m.n), ready = e.count>=m.n && !got;
+        return `<div class="task ${got?"claimed":""}"><div class="row"><span>Deliver ${m.n} event loads</span><span class="pay">${money(m.reward)}</span></div>
+          ${bar(Math.min(e.count,m.n), m.n, ev.color)}
+          <div class="row"><span class="hint num">${Math.min(e.count,m.n)} / ${m.n}</span>${got?`<span class="ok">Claimed</span>`:ready?`<button class="btn sm" data-act="claimMs" data-n="${m.n}">Claim</button>`:""}</div></div>`; }).join("")}</div></section>`;
+  }
+  h += `<section class="sec"><div class="sec-head"><h2>Daily tasks</h2><span class="hint">new tasks in ${longDur(msToMidnight())}</span></div>
+    <p class="hint">Finish a task, then claim its reward before midnight. Rewards grow with your level.</p>
+    <div class="list">${d.tasks.map(t=>{ const ready = !t.claimed && t.progress>=t.target;
+      return `<div class="task ${t.claimed?"claimed":""}"><div class="row"><span>${esc(taskLabel(t))}</span><span class="pay">${money(t.reward)}</span></div>
+        ${bar(t.progress, t.target, t.kind==="event"?ev?.color:null)}
+        <div class="row"><span class="hint num">${t.progress.toLocaleString("en-US")} / ${t.target.toLocaleString("en-US")}</span>${t.claimed?`<span class="ok">Claimed</span>`:ready?`<button class="btn sm" data-act="claimTask" data-id="${t.id}">Claim</button>`:""}</div></div>`; }).join("")}
+      <div class="task bonus ${d.bonusClaimed?"claimed":""}"><div class="row"><b>Finish every daily task</b><span class="pay">${money(roundReward(ALL_TASKS_BONUS))}</span></div>
+        ${bar(d.tasks.filter(t=>t.claimed).length, d.tasks.length)}
+        <div class="row"><span class="hint num">${d.tasks.filter(t=>t.claimed).length} / ${d.tasks.length} claimed</span>${d.bonusClaimed?`<span class="ok">Claimed</span>`:allTasksDone()?`<button class="btn sm" data-act="claimBonus">Claim</button>`:""}</div></div>
+    </div></section>`;
+  return h;
+}
+
+/* Pop-up on login when today's reward hasn't been claimed. */
+function showLoginPopup(){
+  if(!S) return;
+  ensureDay();
+  const ls = loginStatus(); if(ls.claimedToday) return;
+  const ev = activeEvent();
+  $("#loginT").textContent = `Day ${ls.dayIdx+1} reward`;
+  $("#loginBody").innerHTML = `<div class="streak">${LOGIN_REWARDS.map((a,i)=>`<div class="sday ${i<ls.dayIdx?"done":""} ${i===ls.dayIdx?"now":""}"><span>Day ${i+1}</span><b class="num">${money(a)}</b></div>`).join("")}</div>
+    ${ev?`<p class="hint" style="color:var(--ink)"><b>${esc(ev.n)}</b> is on for ${longDur(eventEndsIn(ev))}. Deliver event loads for bonus rewards.</p>`:""}
+    <button class="btn" id="loginClaim">Claim ${money(ls.amount)}</button>`;
+  $("#loginOv").hidden = false;
+  $("#loginClaim").onclick = ()=>{ claimLogin(); $("#loginOv").hidden = true; save(); refresh(); };
 }
 
 /* ---------------- Street map ---------------- */
@@ -392,7 +610,7 @@ function drawJobs(){
   for(const [id,m] of jobMarkers) if(!ids.has(id)){ layerJobs.removeLayer(m); jobMarkers.delete(id); }
   for(const j of S.jobs){
     let m = jobMarkers.get(j.id);
-    const cls = `mk-pin ${jobStatus(j).can?"":"cant"} ${j.id===selectedJob?"sel":""}`;
+    const cls = `mk-pin ${jobStatus(j).can?"":"cant"} ${j.id===selectedJob?"sel":""} ${j.event?"ev":""}`;
     if(!m){
       m = L.marker([j.from.lat,j.from.lon], {icon:L.divIcon({className:"", html:`<div class="${cls}">${PIN_SVG}</div>`, iconSize:[22,28], iconAnchor:[11,27]}), title:`${CARGO[j.cargo].n} · ${money(j.pay)}`});
       m.on("click", e=>{ L.DomEvent.stopPropagation(e); selectJob(j.id); });
@@ -485,6 +703,7 @@ $("#zHome").onclick=()=>{ if(S){ const p=basePt(S.bases[0]); map.flyTo([p.lat,p.
 $("#zArea").onclick=()=>{ if(S){ const b=L.latLngBounds(S.bases.map(x=>{const p=basePt(x);return [p.lat,p.lon];})); map.flyToBounds(b.pad(0.1).extend(L.latLng(b.getNorth()+RADIUS_MI/MI_DEG, b.getEast()+RADIUS_MI/MI_DEG)).extend(L.latLng(b.getSouth()-RADIUS_MI/MI_DEG, b.getWest()-RADIUS_MI/MI_DEG)), {duration:.6}); } };
 
 /* ---------------- Panel ---------------- */
+function evChip(j){ return `<span class="chip evchip" style="--ev:${j.evColor||"#7b3fb5"}"><i></i>${esc(j.item||"Event load")} · +25%</span>`; }
 function cargoChip(c){ return `<span class="chip" style="color:var(--c-${c})"><i></i><span style="color:var(--ink)">${esc(CARGO[c].n)}</span></span>`; }
 function urgTag(u){ return u==="standard"?"":`<span class="urg ${u}">${u}</span>`; }
 function setTab(t){ tab=t; pendingConfirm=null; renderPanel(); document.querySelectorAll(".tab").forEach(b=>b.setAttribute("aria-selected", b.dataset.tab===t)); }
@@ -506,7 +725,7 @@ function goals(){
 function jobCard(j){
   const st = jobStatus(j), local = j.from.c===j.to.c;
   return `<button class="card ${j.id===selectedJob?"sel":""} ${st.can?"":"dim"}" data-act="sel" data-id="${j.id}">
-    <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${cargoChip(j.cargo)}${urgTag(j.urg)}</div><span class="pay">${money(j.pay)}</span></div>
+    <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${j.event?evChip(j):""}${cargoChip(j.cargo)}${urgTag(j.urg)}</div><span class="pay">${money(j.pay)}</span></div>
     <div class="route"><b>${esc(j.from.name||j.from.biz)}</b> <span class="arrow">→</span> <b>${esc(j.to.name||j.to.biz)}</b><br><span class="hint">${esc(addrLine(j.from))} → ${esc(addrLine(j.to))}</span></div>
     <div class="meta"><span class="num">${weightStr(j)}</span><span class="num">${j.routed?"":"about "}${j.miles} mi</span>${j.expires?`<span>expires in <span class="num" data-exp="${j.expires}">${dur(j.expires-S.clock)}</span></span>`:""}</div>
     ${st.can?`<span class="ok">${esc(st.opts[0].v.n)} · back in ${dur(st.opts[0].r.plan.total)}</span>`:`<span class="need">${esc(st.why)}</span>`}
@@ -516,7 +735,7 @@ function payBreakdown(j){
   const w = j.cargo==="vehicles" ? j.weight*4000 : j.weight;
   const dist = 1.5*j.miles*Math.pow(w/1000,0.8);
   const um = j.urg==="express"?1.8:j.urg==="priority"?1.3:1;
-  return `<p class="hint" style="margin:0">Pay: ${money(150*PAY_SCALE)} base + ${money(dist*PAY_SCALE)} for ${j.miles} mi × ${weightStr(j)} × ${CARGO[j.cargo].mult} ${esc(CARGO[j.cargo].n.toLowerCase())}${um>1?` × ${um} ${j.urg}`:""}</p>`;
+  return `<p class="hint" style="margin:0">Pay: ${money(150*PAY_SCALE)} base + ${money(dist*PAY_SCALE)} for ${j.miles} mi × ${weightStr(j)} × ${CARGO[j.cargo].mult} ${esc(CARGO[j.cargo].n.toLowerCase())}${um>1?` × ${um} ${j.urg}`:""}${j.event?` × ${EVENT_PAY_BONUS} event bonus`:""}</p>`;
 }
 function dispatchCard(j){
   const st = jobStatus(j), local = j.from.c===j.to.c;
@@ -532,7 +751,7 @@ function dispatchCard(j){
     opts = `<p class="need" style="font-size:13px;margin:0">${esc(st.why)}</p><div class="btnrow"><button class="btn ghost" data-act="unsel">Close</button>${st.soon?"":`<button class="btn ghost" data-act="tab" data-tab="shop">Open shop</button>`}</div>`;
   }
   return `<section class="dispatch" aria-label="Dispatch job">
-    <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${cargoChip(j.cargo)}${urgTag(j.urg)}</div><span class="pay" style="font-size:18px">${money(j.pay)}</span></div>
+    <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${j.event?evChip(j):""}${cargoChip(j.cargo)}${urgTag(j.urg)}</div><span class="pay" style="font-size:18px">${money(j.pay)}</span></div>
     <div class="leg"><span class="dot"></span><span><b>${esc(j.from.name||j.from.biz)}</b> · ${esc(j.from.biz)}<br><span class="hint">${esc(addrLine(j.from))}</span></span>
       <span class="line"></span><span class="hint"><span class="num">${weightStr(j)}</span> · <span class="num">${j.miles} mi</span> ${j.routing?"· checking roads":j.path?"by road":"(estimate)"}</span>
       <span class="dot end"></span><span><b>${esc(j.to.name||j.to.biz)}</b> · ${esc(j.to.biz)}<br><span class="hint">${esc(addrLine(j.to))}</span></span></div>
@@ -677,12 +896,13 @@ function renderHeader(){
   $("#hdrXp").style.width = (L_>=50?100:Math.min(100,(S.xp-a)/(b-a)*100)) + "%";
   $("#hdrTrips").textContent = S.trips.length;
   $("#jobBadge").textContent = S.jobs.filter(j=>jobStatus(j).can).length;
+  const cc = claimableCount(), tb = $("#taskBadge"); tb.textContent = cc; tb.hidden = !cc;
 }
 function renderPanel(){
   if(!S) return;
   const body = $("#panelBody"), st = body.scrollTop;
   const ae = document.activeElement, keep = ae && ae.id && body.contains(ae) && ae.tagName==="INPUT" ? {id:ae.id, v:ae.value, a:ae.selectionStart, b:ae.selectionEnd} : null;
-  body.innerHTML = tab==="jobs"?renderJobs():tab==="fleet"?renderFleet():tab==="shop"?renderShop():tab==="crew"?renderCrew():tab==="log"?renderLog():renderCompany();
+  body.innerHTML = tab==="jobs"?renderJobs():tab==="fleet"?renderFleet():tab==="shop"?renderShop():tab==="crew"?renderCrew():tab==="log"?renderLog():tab==="tasks"?renderTasks():renderCompany();
   body.scrollTop = st;
   if(keep){ const el = document.getElementById(keep.id); if(el){ el.value = keep.v; el.focus(); try{ el.setSelectionRange(keep.a, keep.b); }catch(_){} } }
   renderHeader();
@@ -738,6 +958,10 @@ $("#panelBody").addEventListener("click", e=>{
   if(a==="disp"){ const b=baseById(id); if(!b) return; if(b.dispatcher) b.dispatcher=false; else if(S.cash>=DISPATCH_PRICE){S.cash-=DISPATCH_PRICE;b.dispatcher=true;} save(); refresh(); return; }
   if(a==="askRen"){ pendingConfirm="ren"+id; renderPanel(); const inp=$("#ren-"+id); if(inp){ inp.focus(); inp.select(); } return; }
   if(a==="ren"){ const v=S.vehicles.find(x=>x.id===id), inp=$("#ren-"+id); const n=(inp?.value||"").trim().slice(0,24); if(v&&n&&n!==v.n){ logEvent(`Renamed <b>${esc(v.n)}</b> to <b>${esc(n)}</b>`); v.n=n; save(); } pendingConfirm=null; refresh(); return; }
+  if(a==="claimLogin"){ claimLogin(); save(); refresh(); return; }
+  if(a==="claimTask"){ claimTask(id); save(); refresh(); return; }
+  if(a==="claimBonus"){ claimBonus(); save(); refresh(); return; }
+  if(a==="claimMs"){ claimMilestone(+el.dataset.n); save(); refresh(); return; }
   if(a==="askSell"){ pendingConfirm="sell"+id; renderPanel(); return; }
   if(a==="sell"){ const v=S.vehicles.find(x=>x.id===id); if(v&&!v.busy){S.cash+=TYPE[v.type].price*0.6; S.vehicles=S.vehicles.filter(x=>x!==v);} pendingConfirm=null; save(); refresh(); return; }
   if(a==="cancel"){ pendingConfirm=null; renderPanel(); return; }
@@ -829,7 +1053,7 @@ function buildHub(){
   if(p.first){
     endPlacement();
     newGame(p.co, p.state, {pt:p.pt, addr:p.info.line, name, city});
-    tab = "jobs"; afterLoad();
+    tab = "jobs"; ensureDay(); afterLoad(); setTimeout(showLoginPopup, 1200);
     map.flyTo([p.pt.lat,p.pt.lon], 11, {duration:1});
     toast(`${esc(name)} is open at ${esc(p.info.line)}. ${esc(S.drivers[0].name)} is waiting with your van.`, 6000);
     save(); return;
@@ -860,6 +1084,7 @@ function tick(){
   const now = Date.now(), dt = now - S.lastReal;
   if(dt > 5*60e3){ S.lastReal = now; const log = simulateAway(dt); refresh(); showAway(log); save(); return; }
   S.clock += dt*S.speed; S.lastReal = now;
+  if(ensureDay()){ showLoginPopup(); renderPanel(); }
   if(logic()){ drawJobs(); renderPanel(); } else renderHeader();
 }
 function start(){
@@ -869,7 +1094,7 @@ function start(){
     S = loaded;
     S.bases.forEach((b,i)=>{ if(b.tier==null) b.tier=0; delete b.slots; if(!b.name) b.name = b.home ? "HQ" : `Hub ${i+1}`; });
     S.jobs = S.jobs.filter(fitsUnlocked);
-    S.jobs.forEach(j=>{ j.pay = payFor(j.miles, j.weight, j.cargo, j.urg); if(j.urg==="standard") j.expires=null; if(!j.from.name){ j.from.name=bizName(j.from.biz); j.from.num=houseNo(); j.to.name=bizName(j.to.biz); j.to.num=houseNo(); } });
+    S.jobs.forEach(j=>{ j.pay = jobPay(j); if(j.urg==="standard") j.expires=null; if(!j.from.name){ j.from.name=bizName(j.from.biz); j.from.num=houseNo(); j.to.name=bizName(j.to.biz); j.to.num=houseNo(); } });
     const dt = Date.now() - S.lastReal; let log = null;
     S.lastReal = Date.now();
     if(dt > 60e3) log = simulateAway(dt); else S.trips.forEach(roadTrip);
@@ -877,6 +1102,7 @@ function start(){
     afterLoad();
     const p = basePt(S.bases[0]); map.setView([p.lat,p.lon], 10);
     showAway(log);
+    ensureDay(); showLoginPopup();
   } else showStart();
   setInterval(tick, 250);
   setInterval(liveText, 1000);
