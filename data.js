@@ -86,9 +86,9 @@ const UNLOCKS = {2:"Box truck",5:"Reefer box truck",6:"CDL drivers and straight 
 
 /* Hub sizes: every garage starts Small and can be upgraded. */
 const HUB_TIERS = [
-  {n:"Small hub",  cap:10, price:0,      lvl:1},
-  {n:"Medium hub", cap:20, price:75000,  lvl:4},
-  {n:"Large hub",  cap:30, price:200000, lvl:10}
+  {n:"Small hub",  cap:20, price:0,      lvl:1},
+  {n:"Medium hub", cap:40, price:75000,  lvl:4},
+  {n:"Large hub",  cap:60, price:200000, lvl:10}
 ];
 const JOB_EVERY_MS = 30000;   // a new job posts every 30 seconds while the board has room
 

@@ -1114,7 +1114,7 @@ function renderShop(){
   const cityOpts = Object.keys(STATES).map(s=>`<optgroup label="${STATES[s]}">${CITIES.filter(c=>c.s===s).map(c=>`<option value="${c.i}">${esc(c.n)}</option>`).join("")}</optgroup>`).join("");
   h += `<section class="sec ${cz("hubs")}">${secHead("hubs","Hubs")}
     <div class="card ${L_<GARAGE_LVL?"dim":""}"><div class="row"><b>Open a new hub</b><span class="num">${money(GARAGE_PRICE)}</span></div>
-      <p class="hint">Opens a small hub (10 vehicles) with jobs posted within about ${RADIUS_MI} miles. Own as many hubs as you like, even several in one city.</p>
+      <p class="hint">Opens a small hub (${HUB_TIERS[0].cap} vehicles) with jobs posted within about ${RADIUS_MI} miles. Own as many hubs as you like, even several in one city.</p>
       <div class="btnrow"><button class="btn sm" data-act="placeHub" ${S.cash<GARAGE_PRICE?"disabled":""}>${S.cash<GARAGE_PRICE?"Not enough cash":"Pick a spot on the map"}</button></div></div>
     ${S.bases.map(b=>{const t=b.tier||0, nx=HUB_TIERS[t+1], n=S.vehicles.filter(v=>v.base===b.id).length;
       return `<div class="card"><div class="row"><b>${esc(baseName(b))}</b><span class="num">${n}/${hubCap(b)} vehicles</span></div>
