@@ -333,7 +333,35 @@ function simulateAway(ms){
 
 /* ---------------- Street map ---------------- */
 const map = L.map("map", {zoomControl:true, worldCopyJump:false, minZoom:4, maxZoom:18, preferCanvas:false}).setView([38.5,-96], 4);
-L.tileLayer(TILE_URL, {maxZoom:19, attribution:TILE_ATTR}).addTo(map);
+// Map styles players can switch between (all free, no API key).
+const OSM = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+const CARTO = OSM + ' &copy; <a href="https://carto.com/attributions">CARTO</a>';
+const ESRI = 'Tiles &copy; <a href="https://www.esri.com">Esri</a>';
+const MAP_STYLES = {
+  standard:  {n:"Standard",       layers:[[TILE_URL, {maxZoom:19, attribution:TILE_ATTR}]]},
+  voyager:   {n:"Clean (Apple-like)", layers:[["https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {maxZoom:20, subdomains:"abcd", attribution:CARTO}]]},
+  light:     {n:"Light",          layers:[["https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {maxZoom:20, subdomains:"abcd", attribution:CARTO}]]},
+  dark:      {n:"Dark",           layers:[["https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {maxZoom:20, subdomains:"abcd", attribution:CARTO}]]},
+  street:    {n:"Street (Esri)",  layers:[["https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", {maxZoom:19, attribution:ESRI}]]},
+  satellite: {n:"Satellite",      layers:[["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {maxZoom:19, attribution:ESRI+", Maxar, Earthstar Geographics"}],
+                                         ["https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}", {maxZoom:19}],
+                                         ["https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", {maxZoom:19}]]}
+};
+let baseLayers = [];
+function setMapStyle(key){
+  const st = MAP_STYLES[key] || MAP_STYLES.standard;
+  baseLayers.forEach(l=>map.removeLayer(l));
+  baseLayers = st.layers.map(([u,o])=>L.tileLayer(u,o).addTo(map));
+  baseLayers.forEach(l=>l.bringToBack());
+  try{ localStorage.setItem("freight-dispatch-mapstyle", key); }catch(_){}
+  const sel = document.getElementById("mapStyle"); if(sel) sel.value = key in MAP_STYLES ? key : "standard";
+}
+(()=>{ const sel = document.getElementById("mapStyle");
+  sel.innerHTML = Object.entries(MAP_STYLES).map(([k,v])=>`<option value="${k}">${v.n}</option>`).join("");
+  sel.addEventListener("change", ()=>setMapStyle(sel.value));
+  let saved = "standard"; try{ saved = localStorage.getItem("freight-dispatch-mapstyle") || "standard"; }catch(_){}
+  setMapStyle(saved);
+})();
 // Keep the map filling its box when the layout or window size changes.
 try{ new ResizeObserver(()=>map.invalidateSize()).observe(document.getElementById("map")); }catch(_){}
 window.addEventListener("load", ()=>map.invalidateSize());
