@@ -984,7 +984,7 @@ function activeCard({tr, l, due}){
   </div>`;
 }
 function renderJobs(mode="truck"){
-  const rail = mode==="rail";
+  const rail = mode==="rail", kp = rail ? "jr-" : "jt-";
   if(rail && level() < RAIL_LVL) return `<section class="sec"><h2>Train jobs</h2><div class="card dim"><div class="row"><b>Trains unlock at level ${RAIL_LVL}</b><span class="lock">Level ${RAIL_LVL}</span></div><p class="hint">Run trains between real freight yards on real track. You are level ${level()}.</p></div></section>`;
   const sj = S.jobs.find(j=>j.id===selectedJob && !!j.rail===rail);
   const list = S.jobs.filter(j=>!!j.rail===rail).map(j=>({j,can:jobStatus(j).can})).sort((a,b)=>(b.can-a.can)||(b.j.pay-a.j.pay));
@@ -999,9 +999,9 @@ function renderJobs(mode="truck"){
   if(!rail && S.jobsDone<1 && !sj) h += `<p class="hint" style="color:var(--ink)">Tap an orange pin on the map, or pick a job below, then send your van. Gray pins need a vehicle you do not own yet.</p>`;
   h += rail ? `<p class="hint">Train job board: ${railCount()} of ${maxRailJobs()} (one more than your ${S.vehicles.filter(isTrain).length} train${S.vehicles.filter(isTrain).length===1?"":"s"}). A new one posts every ${JOB_EVERY_MS/1000} seconds.</p>` : `<p class="hint">Truck job board: ${boardCount()} of ${maxJobs()} (one more than your ${trucks().length} truck${trucks().length===1?"":"s"}). A new one posts every ${JOB_EVERY_MS/1000} seconds.</p>`;
   { const active = activeLoads(rail);
-    if(active.length) h += `<section class="sec"><div class="sec-head"><h2>In progress</h2><span class="hint num">${active.length}</span></div><div class="list">${active.map(a=>activeCard(a)).join("")}</div></section>`; }
-  h += `<section class="sec"><div class="sec-head"><h2>Ready to run</h2><span class="hint num">${can.length}</span></div>${can.length?`<div class="list">${can.map(x=>jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. ${rail?"A new train job posts every 30 seconds.":"A new job posts every 30 seconds."}</p>`}</section>`;
-  if(cant.length) h += `<section class="sec"><div class="sec-head"><h2>Other jobs nearby</h2><span class="hint num">${cant.length}</span></div><div class="list">${cant.map(x=>jobCard(x.j)).join("")}</div></section>`;
+    if(active.length) h += `<section class="sec ${cz(kp+"active")}">${secHead(kp+"active","In progress",`<span class="hint num">${active.length}</span>`)}<div class="list">${active.map(a=>activeCard(a)).join("")}</div></section>`; }
+  h += `<section class="sec ${cz(kp+"ready")}">${secHead(kp+"ready","Ready to run",`<span class="hint num">${can.length}</span>`)}${can.length?`<div class="list">${can.map(x=>jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. ${rail?"A new train job posts every 30 seconds.":"A new job posts every 30 seconds."}</p>`}</section>`;
+  if(cant.length) h += `<section class="sec ${cz(kp+"other")}">${secHead(kp+"other","Other jobs nearby",`<span class="hint num">${cant.length}</span>`)}<div class="list">${cant.map(x=>jobCard(x.j)).join("")}</div></section>`;
   return h;
 }
 function renderAir(){
