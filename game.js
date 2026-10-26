@@ -688,6 +688,7 @@ function start(){
     const dt = Date.now() - S.lastReal; let log = null;
     S.lastReal = Date.now();
     if(dt > 60e3) log = simulateAway(dt); else S.trips.forEach(roadTrip);
+    S.jobs.forEach(j=>{ if(!j.routed) routeJob(j); });
     afterLoad();
     const p = basePt(S.bases[0]); map.setView([p.lat,p.lon], 10);
     showAway(log);
