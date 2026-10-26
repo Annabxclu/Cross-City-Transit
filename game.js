@@ -1082,9 +1082,16 @@ function renderTrainShop(L_){
         ${locked?`<span class="lock">Unlocks at level ${l.lvl}</span>`:`<div class="btnrow"><select id="ly-${l.id}" aria-label="Home yard for ${esc(l.n)}" style="flex:1;min-width:0;width:auto">${yo}</select><button class="btn sm" data-act="buyLoco" data-id="${l.id}" ${poor?"disabled":""}>${poor?"Not enough cash":"Buy"}</button></div>`}</div>`; }).join("")}
     <div class="card"><b>Railcars</b><table class="spec"><tbody>${Object.values(RAILCARS).map(c=>`<tr><td>${c.n} · ${c.cargo.map(x=>CARGO[x].n).join(", ")}</td><td>${money(c.price)}</td></tr>`).join("")}</tbody></table></div>`;
 }
+// Collapsible shop sections; remembered in this browser.
+let collapsed = new Set(); try{ collapsed = new Set(JSON.parse(localStorage.getItem("freight-dispatch-collapsed")||"[]")); }catch(_){}
+const cz = k => collapsed.has(k) ? "collapsed" : "";
+function secHead(k, title, extra=""){
+  const c = collapsed.has(k);
+  return `<div class="sec-head"><h2>${title}</h2><span class="sec-tools">${extra}<button class="collapse" data-act="toggleSec" data-k="${k}" aria-expanded="${!c}" title="${c?"Show":"Hide"} ${title.toLowerCase()}">${c?"+":"−"}</button></span></div>`;
+}
 function renderShop(){
   const L_ = level();
-  let h = `<section class="sec"><div class="sec-head"><h2>Trucks</h2><span class="hint">60% back when sold</span></div><div class="list">`;
+  let h = `<section class="sec ${cz("trucks")}">${secHead("trucks","Trucks",`<span class="hint">60% back when sold</span>`)}<div class="list">`;
   const baseOpts = S.bases.map(b=>{const n=S.vehicles.filter(v=>v.base===b.id).length;return `<option value="${b.id}" ${n>=hubCap(b)?"disabled":""}>${esc(baseName(b))} (${n}/${hubCap(b)})</option>`;}).join("");
   const anySlot = S.bases.some(b=>S.vehicles.filter(v=>v.base===b.id).length<hubCap(b));
   for(const t of TYPES){
@@ -1096,7 +1103,7 @@ function renderShop(){
   h += `</div></section>`;
   const used = new Set(S.bases.map(b=>b.city));
   const cityOpts = Object.keys(STATES).map(s=>`<optgroup label="${STATES[s]}">${CITIES.filter(c=>c.s===s).map(c=>`<option value="${c.i}">${esc(c.n)}</option>`).join("")}</optgroup>`).join("");
-  h += `<section class="sec"><h2>Hubs</h2>
+  h += `<section class="sec ${cz("hubs")}">${secHead("hubs","Hubs")}
     <div class="card ${L_<GARAGE_LVL?"dim":""}"><div class="row"><b>Open a new hub</b><span class="num">${money(GARAGE_PRICE)}</span></div>
       <p class="hint">Opens a small hub (10 vehicles) with jobs posted within about ${RADIUS_MI} miles. Own as many hubs as you like, even several in one city.</p>
       <div class="btnrow"><button class="btn sm" data-act="placeHub" ${S.cash<GARAGE_PRICE?"disabled":""}>${S.cash<GARAGE_PRICE?"Not enough cash":"Pick a spot on the map"}</button></div></div>
@@ -1106,8 +1113,8 @@ function renderShop(){
       ${pendingConfirm===("renh"+b.id)?`<div class="btnrow"><input type="text" id="renh-${b.id}" maxlength="28" value="${esc(baseName(b))}" aria-label="New name for ${esc(baseName(b))}" style="flex:1;min-width:0;width:auto"><button class="btn sm" data-act="renHub" data-id="${b.id}">Save</button><button class="btn ghost sm" data-act="cancel">Cancel</button></div>`:`<div class="btnrow"><button class="btn ghost sm" data-act="askRenHub" data-id="${b.id}">Rename hub</button></div>`}
       <div class="btnrow">${!nx?`<span class="lock">Largest size</span>`:nx.lvl>L_?`<span class="lock">${nx.n} (${nx.cap} vehicles) unlocks at level ${nx.lvl}</span>`:`<button class="btn ghost sm" data-act="slot" data-id="${b.id}" ${S.cash<nx.price?"disabled":""}>Upgrade to ${nx.n} (${nx.cap} vehicles) · ${money(nx.price)}</button>`}</div></div>`;}).join("")}
   </section>
-  <section class="sec"><h2>Trains</h2>${renderTrainShop(L_)}</section>
-  <section class="sec"><h2>Coming next</h2>
+  <section class="sec ${cz("trains")}">${secHead("trains","Trains")}${renderTrainShop(L_)}</section>
+  <section class="sec ${cz("next")}">${secHead("next","Coming next")}
     <div class="card dim"><div class="row"><b>Air cargo</b><span class="lock">Level 20</span></div><p class="hint">Unlock airports and fly urgent freight between them, Pocket Planes style.</p></div></section>`;
   return h;
 }
@@ -1256,6 +1263,7 @@ $("#panelBody").addEventListener("click", e=>{
   }
   if(a==="setLvl"){ if(!S.test) return; const L_ = +$("#testLvl").value; S.xp = xpNeed(L_); logEvent(`Test mode: set to level ${L_}`); drawYards(); save(); refresh(); return; }
   if(a==="addCash"){ if(!S.test) return; const n = +el.dataset.n; S.cash += n; logEvent(`Test mode: added ${money(n)}`); save(); refresh(); return; }
+  if(a==="toggleSec"){ const k = el.dataset.k; collapsed.has(k) ? collapsed.delete(k) : collapsed.add(k); try{ localStorage.setItem("freight-dispatch-collapsed", JSON.stringify([...collapsed])); }catch(_){} renderPanel(); return; }
   if(a==="askSell"){ pendingConfirm="sell"+id; renderPanel(); return; }
   if(a==="sell"){ const v=S.vehicles.find(x=>x.id===id); if(v&&!tripOf(v)){S.cash+=vehValue(v)*0.6; S.vehicles=S.vehicles.filter(x=>x!==v);} pendingConfirm=null; save(); refresh(); return; }
   if(a==="cancel"){ pendingConfirm=null; renderPanel(); return; }

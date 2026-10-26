@@ -268,3 +268,8 @@ label.fld{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(
 .sign .menubtn{border:1px solid var(--sign-line);background:rgba(255,255,255,.08);color:var(--sign-ink);border-radius:5px;padding:7px 12px;font-family:var(--display);font-weight:600;font-size:15px;letter-spacing:.08em;text-transform:uppercase;display:inline-flex;align-items:center;gap:6px}
 .sign .menubtn:hover,.sign .menubtn[aria-expanded="true"],.sign .menubtn[aria-selected="true"]{background:var(--sign-ink);color:var(--sign)}
 .sign .menu{left:0;right:auto}
+.sec-tools{display:flex;align-items:center;gap:10px}
+.collapse{width:28px;height:28px;border:1px solid var(--line);border-radius:5px;background:var(--surface);color:var(--ink);font-family:var(--mono);font-size:17px;line-height:1;display:grid;place-items:center;padding:0}
+.collapse:hover{background:var(--surface2)}
+.sec.collapsed > :not(.sec-head){display:none}
+.sec.collapsed .sec-tools .hint{display:none}
