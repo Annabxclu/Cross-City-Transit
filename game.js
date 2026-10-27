@@ -1310,14 +1310,11 @@ function dispatchCard(j){
   let opts;
   if(st.can){
     if(chosenVeh && !st.opts.find(o=>o.v.id===chosenVeh)) chosenVeh = null;   // you choose; nothing is picked for you
-    const mode = j.air ? "plane" : j.rail ? "train" : "truck";
-    const others = S.vehicles.filter(v=>(TYPE[v.type].mode||"truck")===mode && !st.opts.find(o=>o.v.id===v.id));
     const sel = st.opts.find(o=>o.v.id===chosenVeh);
     opts = `<label class="fld" for="vehPick">Vehicle</label>
       <select id="vehPick" aria-label="Choose a vehicle for this job">
         <option value="" ${chosenVeh?"":"selected"}>Choose a vehicle… (${st.opts.length} available)</option>
         ${st.opts.map(o=>`<option value="${o.v.id}" ${o.v.id===chosenVeh?"selected":""}>${esc(o.v.n)} · ${esc(TYPE[o.v.type].n)}${o.r.plan.adding?" · on a trip, has room":""} · delivers in ${dur(o.r.plan.deliverIn)}</option>`).join("")}
-        ${others.map(v=>`<option disabled>${esc(v.n)} · ${esc(vehicleFor(v,j).why||"Not available")}</option>`).join("")}
       </select>
       ${sel ? (o=>{ const p=o.r.plan; return `<div class="opt chosen"><span><b>${esc(o.v.n)}</b> · ${esc(TYPE[o.v.type].n)}<small>${esc(o.r.drivers.map(d=>d.name).join(" + "))} · ${p.adding?`<b>Adds to its current trip</b> (${p.loads} loads, ${capText(o.v, j)}) · `:""}${p.dead>1?`${p.dead} mi to ${isTrain(o.v)?"the pickup yard":isPlane(o.v)?"the pickup airport":"pickup"} · `:""}${p.adding?"":`loading ${dur(p.ld)} · ${isPlane(o.v)?"flight":"drive"} ${dur(p.tHaul)} · unloading ${dur(p.lu)}<br>`}Delivers this load in ${dur(p.deliverIn)}, back at ${isTrain(o.v)?"its yard":isPlane(o.v)?"its home airport":"the hub"} in ${dur(p.total)}${p.adding&&p.extra>0?` (+${dur(p.extra)})`:""}</small></span><span class="pay" title="Job pay">${money(Math.round(j.pay*p.bonus*(1-p.cut)))}</span></div>`; })(sel) : `<p class="hint" style="margin:0">Pick a vehicle to see its timing, then dispatch.</p>`}
       ${sel ? extraLoadsList(j, sel.v) : ""}
