@@ -1108,7 +1108,10 @@ function selectJob(id, fly){
   selectedJob=id; chosenVeh=null; extraSel = new Set();
   const j = S.jobs.find(x=>x.id===id);
   tab = !j ? "jobs" : j.air ? "air" : j.rail ? "rail" : "jobs"; markTabs(); if(j){ routeJob(j); if(fly) fitJob(j); }
-  drawJobs(); renderPanel(); $("#panelBody").scrollTop=0;
+  if(j){ const kp = j.air ? "ja-" : j.rail ? "jr-" : "jt-"; [kp+"ready", kp+"other"].forEach(k=>collapsed.delete(k)); }
+  drawJobs(); renderPanel();
+  // The dispatch card opens in place of the job you picked, so you stay where you were in the list.
+  const card = $("#panelBody .dispatch"); if(card) card.scrollIntoView({block:"nearest"});
 }
 function goals(){
   const has = id=>S.vehicles.some(v=>v.type===id);
@@ -1212,7 +1215,6 @@ function renderJobs(mode="truck"){
   const list = S.jobs.filter(j=>jobKind(j)===kind).map(j=>({j,can:jobStatus(j).can})).sort((a,b)=>(b.can-a.can)||(b.j.pay-a.j.pay));
   const can = list.filter(x=>x.can), cant = list.filter(x=>!x.can);
   let h = "";
-  if(sj) h += dispatchCard(sj);
   if(rail){
     const trains = S.vehicles.filter(isTrain);
     if(!trains.length) h += `<p class="hint" style="color:var(--ink)">You have no trains yet. Buy a locomotive in <b>Menu → Shop</b>, add railcars in the <b>Fleet</b> tab, and hire an engineer in <b>Menu → Crew</b>.</p>`;
@@ -1228,8 +1230,8 @@ function renderJobs(mode="truck"){
     h += `<p class="hint">${name} job board: ${n} of ${JOB_BOARD_MAX}. A new job posts every ${JOB_EVERY_MS>=60000?(JOB_EVERY_MS===60000?"minute":`${JOB_EVERY_MS/60000} minutes`):`${JOB_EVERY_MS/1000} seconds`}${n>=JOB_BOARD_MAX?"; when full, the oldest job you can't take is swapped for a new one":""}.</p>`; }
   { const active = activeLoads(kind);
     if(active.length) h += `<section class="sec ${cz(kp+"active")}">${secHead(kp+"active","In progress",`<span class="hint num">${active.length}</span>`)}<div class="list">${active.map(a=>activeCard(a)).join("")}</div></section>`; }
-  h += `<section class="sec ${cz(kp+"ready")}">${secHead(kp+"ready","Available jobs",`<span class="hint num">${can.length}</span>`)}${can.length?`<div class="list">${can.map(x=>jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. A new job posts every minute.</p>`}</section>`;
-  if(cant.length) h += `<section class="sec ${cz(kp+"other")}">${secHead(kp+"other","Other jobs nearby",`<span class="hint num">${cant.length}</span>`)}<div class="list">${cant.map(x=>jobCard(x.j)).join("")}</div></section>`;
+  h += `<section class="sec ${cz(kp+"ready")}">${secHead(kp+"ready","Available jobs",`<span class="hint num">${can.length}</span>`)}${can.length?`<div class="list">${can.map(x=>x.j.id===selectedJob?dispatchCard(x.j):jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. A new job posts every minute.</p>`}</section>`;
+  if(cant.length) h += `<section class="sec ${cz(kp+"other")}">${secHead(kp+"other","Other jobs nearby",`<span class="hint num">${cant.length}</span>`)}<div class="list">${cant.map(x=>x.j.id===selectedJob?dispatchCard(x.j):jobCard(x.j)).join("")}</div></section>`;
   return h;
 }
 function stopName(tr, sk, jid){ const j = tr.loads.find(l=>l.job.id===jid)?.job; if(!j) return ""; return sk==="pick" ? (j.from.name||j.from.biz) : (j.to.name||j.to.biz); }
