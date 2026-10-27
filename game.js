@@ -915,11 +915,11 @@ const MAP_STYLES = {
   standard:  {n:"Standard",      layers:[[TILE_URL, {maxZoom:19, attribution:TILE_ATTR}]]},
   street:    {n:"Street",        layers:[[EB+"World_Street_Map/MapServer/tile/{z}/{y}/{x}", {maxZoom:19, attribution:ESRI}]]},
   topo:      {n:"Topographic",   layers:[[EB+"World_Topo_Map/MapServer/tile/{z}/{y}/{x}", {maxZoom:19, attribution:ESRI}]]},
-  light:     {n:"Light gray",    layers:[[EB+"Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}", {maxZoom:16, attribution:ESRI}],
-                                         [EB+"Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}", {maxZoom:16}],
+  light:     {n:"Light gray",    layers:[[EB+"Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}", {maxNativeZoom:16, maxZoom:19, attribution:ESRI}],
+                                         [EB+"Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}", {maxNativeZoom:16, maxZoom:19}],
                                          [EB+"Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}", {maxZoom:19, opacity:.6}]]},
-  dark:      {n:"Dark gray",     layers:[[EB+"Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", {maxZoom:16, attribution:ESRI}],
-                                         [EB+"Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}", {maxZoom:16}]]},
+  dark:      {n:"Dark gray",     layers:[[EB+"Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", {maxNativeZoom:16, maxZoom:19, attribution:ESRI}],
+                                         [EB+"Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}", {maxNativeZoom:16, maxZoom:19}]]},
   humanitarian:{n:"Humanitarian", layers:[["https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png", {maxZoom:19, subdomains:"abc", attribution:OSM+', <a href="https://www.hotosm.org/">HOT</a>'}]]},
   satellite: {n:"Satellite",     layers:[[EB+"World_Imagery/MapServer/tile/{z}/{y}/{x}", {maxZoom:19, attribution:ESRI+", Maxar, Earthstar Geographics"}],
                                          [EB+"Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}", {maxZoom:19}],
@@ -969,6 +969,11 @@ const layerStops = L.layerGroup().addTo(map);
 const PIN_SVG = '<svg width="22" height="28" viewBox="0 0 22 28"><path class="body" d="M11 27C9 22 2 17 2 10.5A9 9 0 0 1 20 10.5C20 17 13 22 11 27Z"/><circle class="hole" cx="11" cy="10.5" r="3.4"/></svg>';
 map.on("click", e=>{ if(placing){ placeAt(e.latlng); return; } if(selectedJob){ selectedJob=null; drawJobs(); renderPanel(); } });
 
+// Job-area rings are hundreds of miles wide. Zoomed in to street level, phones and iPads have to draw a dashed
+// circle millions of pixels around, which freezes Safari. The ring is off-screen at that zoom anyway, so hide it.
+const RING_MAX_ZOOM = 10;
+function syncRings(){ const show = map.getZoom() <= RING_MAX_ZOOM; if(show && !map.hasLayer(layerRings)) layerRings.addTo(map); else if(!show && map.hasLayer(layerRings)) map.removeLayer(layerRings); }
+map.on("zoomend", syncRings);
 function drawBases(){
   layerBases.clearLayers(); layerRings.clearLayers();
   S.bases.forEach((b,i)=>{
