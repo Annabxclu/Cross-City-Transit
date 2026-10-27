@@ -318,3 +318,5 @@ label.fld{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(
 .extras{display:flex;flex-direction:column;gap:6px;margin-top:4px}
 .extras .row{font-size:13px}
 .extras .opt.dim{opacity:.5;cursor:default}
+.sortbar{display:flex;align-items:center;gap:8px;margin:0 0 10px;flex-wrap:wrap}
+.sortbar select{width:auto;flex:0 1 auto}

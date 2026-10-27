@@ -1212,12 +1212,29 @@ function activeCard({tr, l, due}){
     <div class="row"><span class="countdown">Delivers in <b class="num" data-due="${due}">${dur(due - t)}</b></span><button class="btn ghost sm" data-act="follow" data-id="${tr.id}">Follow on map</button></div>
   </div>`;
 }
+// Sorting the job lists: by payout, miles, weight or fastest delivery, either direction. Remembered in this browser.
+const SORTS = {pay:["Payout","desc"], miles:["Mileage","desc"], weight:["Weight (lb)","desc"], eta:["Fastest delivery","asc"]};
+let jobSort = {k:"pay", dir:"desc"};
+try{ const v = JSON.parse(localStorage.getItem("freight-dispatch-sort")||"null"); if(v && SORTS[v.k] && /^(asc|desc)$/.test(v.dir)) jobSort = v; }catch(_){}
+function saveSort(){ try{ localStorage.setItem("freight-dispatch-sort", JSON.stringify(jobSort)); }catch(_){} }
+function sortJobs(list){
+  const {k, dir} = jobSort, sg = dir==="asc" ? 1 : -1;
+  const val = x => k==="eta" ? x.eta : k==="weight" ? (x.j.cargo==="vehicles" ? x.j.weight*4000 : x.j.weight) : x.j[k];
+  return list.sort((a,b)=>{ const va = val(a), vb = val(b);
+    if(va==null || vb==null) return (va==null) - (vb==null) || b.j.pay - a.j.pay;   // no delivery time yet: list last
+    return (va - vb)*sg || b.j.pay - a.j.pay; });
+}
+function sortBar(){
+  return `<div class="sortbar"><label for="jobSort" class="hint">Sort by</label>
+    <select id="jobSort" aria-label="Sort jobs by">${Object.entries(SORTS).map(([k,[n]])=>`<option value="${k}" ${k===jobSort.k?"selected":""}>${n}</option>`).join("")}</select>
+    <button class="btn ghost sm" data-act="sortDir" aria-label="Change sort direction">${jobSort.k==="eta" ? (jobSort.dir==="asc"?"Fastest first":"Slowest first") : (jobSort.dir==="desc"?"Highest first":"Lowest first")}</button></div>`;
+}
 function renderJobs(mode="truck"){
   const kind = mode, rail = kind==="rail", air = kind==="air", kp = rail ? "jr-" : air ? "ja-" : "jt-";
   if(air && level() < AIR_LVL) return `<section class="sec"><h2>Air cargo jobs</h2><div class="card dim"><div class="row"><b>Air cargo unlocks at level ${AIR_LVL}</b><span class="lock">Level ${AIR_LVL}</span></div><p class="hint">Fly urgent freight between real US airports. You are level ${level()}.</p></div></section>`;
   if(rail && level() < RAIL_LVL) return `<section class="sec"><h2>Train jobs</h2><div class="card dim"><div class="row"><b>Trains unlock at level ${RAIL_LVL}</b><span class="lock">Level ${RAIL_LVL}</span></div><p class="hint">Run trains between real freight yards on real track. You are level ${level()}.</p></div></section>`;
   const sj = S.jobs.find(j=>j.id===selectedJob && jobKind(j)===kind);
-  const list = S.jobs.filter(j=>jobKind(j)===kind).map(j=>({j,can:jobStatus(j).can})).sort((a,b)=>(b.can-a.can)||(b.j.pay-a.j.pay));
+  const list = sortJobs(S.jobs.filter(j=>jobKind(j)===kind).map(j=>{ const st = jobStatus(j); return {j, can:st.can, eta: st.can ? st.opts[0].r.plan.deliverIn : null}; }));
   const can = list.filter(x=>x.can), cant = list.filter(x=>!x.can);
   let h = "";
   if(rail){
@@ -1235,7 +1252,7 @@ function renderJobs(mode="truck"){
     h += `<p class="hint">${name} job board: ${n} of ${JOB_BOARD_MAX}. A new job posts every ${JOB_EVERY_MS>=60000?(JOB_EVERY_MS===60000?"minute":`${JOB_EVERY_MS/60000} minutes`):`${JOB_EVERY_MS/1000} seconds`}${n>=JOB_BOARD_MAX?"; when full, the oldest job you can't take is swapped for a new one":""}.</p>`; }
   { const active = activeLoads(kind);
     if(active.length) h += `<section class="sec ${cz(kp+"active")}">${secHead(kp+"active","In progress",`<span class="hint num">${active.length}</span>`)}<div class="list">${active.map(a=>activeCard(a)).join("")}</div></section>`; }
-  h += `<section class="sec ${cz(kp+"ready")}">${secHead(kp+"ready","Available jobs",`<span class="hint num">${can.length}</span>`)}${can.length?`<div class="list">${can.map(x=>x.j.id===selectedJob?dispatchCard(x.j):jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. A new job posts every minute.</p>`}</section>`;
+  h += `<section class="sec ${cz(kp+"ready")}">${secHead(kp+"ready","Available jobs",`<span class="hint num">${can.length}</span>`)}${list.length>1?sortBar():""}${can.length?`<div class="list">${can.map(x=>x.j.id===selectedJob?dispatchCard(x.j):jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. A new job posts every minute.</p>`}</section>`;
   if(cant.length) h += `<section class="sec ${cz(kp+"other")}">${secHead(kp+"other","Other jobs nearby",`<span class="hint num">${cant.length}</span>`)}<div class="list">${cant.map(x=>x.j.id===selectedJob?dispatchCard(x.j):jobCard(x.j)).join("")}</div></section>`;
   return h;
 }
@@ -1552,6 +1569,7 @@ $("#panelBody").addEventListener("click", e=>{
   const a = el.dataset.act, id = el.dataset.id;
   if(a==="sel"){ selectJob(id, true); return; }
   if(a==="fly"){ const j=S.jobs.find(x=>x.id===id); if(j) fitJob(j); return; }
+  if(a==="sortDir"){ jobSort.dir = jobSort.dir==="asc" ? "desc" : "asc"; saveSort(); renderPanel(); return; }
   if(a==="unsel"){ selectedJob=null; drawJobs(); renderPanel(); return; }
   if(a==="tab"){ setTab(el.dataset.tab); return; }
   if(a==="follow"){ following = id; const tr=S.trips.find(x=>x.id===id); if(tr) map.flyTo(posOf(tr,displayClock()).ll, Math.max(map.getZoom(),13), {duration:.6}); return; }
@@ -1635,7 +1653,8 @@ $("#panelBody").addEventListener("click", e=>{
 });
 $("#panelBody").addEventListener("keydown", e=>{ if(e.key==="Enter" && e.target.id?.startsWith("ren-")){ e.preventDefault(); $(`[data-act=ren][data-id="${e.target.id.slice(4)}"]`)?.click(); }
   if(e.key==="Enter" && e.target.id?.startsWith("renh-")){ e.preventDefault(); $(`[data-act=renHub][data-id="${e.target.id.slice(5)}"]`)?.click(); } if(e.key==="Escape" && e.target.id?.startsWith("ren-")){ pendingConfirm=null; renderPanel(); } });
-$("#panelBody").addEventListener("change", e=>{ if(e.target.name==="veh") chosenVeh=e.target.value; if(e.target.id==="vehPick"){ chosenVeh = e.target.value || null; extraSel = new Set(); renderPanel(); }
+$("#panelBody").addEventListener("change", e=>{ if(e.target.name==="veh") chosenVeh=e.target.value; if(e.target.id==="jobSort"){ jobSort = {k:e.target.value, dir:SORTS[e.target.value][1]}; saveSort(); renderPanel(); }
+  if(e.target.id==="vehPick"){ chosenVeh = e.target.value || null; extraSel = new Set(); renderPanel(); }
   if(e.target.name==="extra"){ e.target.checked ? extraSel.add(e.target.value) : extraSel.delete(e.target.value); const y=$("#panelBody").scrollTop; renderPanel(); $("#panelBody").scrollTop=y; } if(e.target.id==="hdrCustom"){ setHeaderColor(e.target.value); renderPanel(); } if(e.target.id==="testToggle"){ S.test = e.target.checked; save(); renderPanel(); } });
 document.querySelectorAll(".tab[data-tab]").forEach(b=>b.addEventListener("click",()=>{ closeMenu(); setTab(b.dataset.tab); }));
 // Menu dropdown for Fleet, Shop, Crew, Tasks, Log and Company
