@@ -511,6 +511,7 @@ function deliverLoad(tr, ld){
   const before = level();
   S.cash += net; S.earned += net; S.xp += jobXp(j); S.jobsDone++;
   recordDelivery({job:j, haulMi:j.miles}, net);
+  contractDelivered(j);
   const v = S.vehicles.find(x=>x.id===tr.v); if(v) v.jobs++;
   tr.drivers.forEach(id=>{const d=S.drivers.find(x=>x.id===id); if(d){d.jobs++;}});
   const what = j.event ? esc(j.item.toLowerCase()) : esc(CARGO[j.cargo].n.toLowerCase());
@@ -548,12 +549,13 @@ function logic(){
   // Mission Chief style: a new job every minute on each board, however many vehicles you own.
   // Each board holds up to JOB_BOARD_MAX jobs. When a board is full, the oldest job your fleet can't
   // take is swapped for a new one, so the board stays fresh. Jobs you can run are never removed.
+  if(contractTick()) changed = true;
   for(const [kind, lvl, timer, spawn] of [["rail", RAIL_LVL, "nextRailAt", spawnRailJob], ["air", airOpen() ? 1 : AIR_LVL, "nextAirAt", spawnAirJob], ["truck", 1, "nextJobAt", spawnJob]]){
     if(level() < lvl) continue;
     const mine = S.jobs.filter(j=>jobKind(j)===kind);
     if(mine.length && S.clock < (S[timer]||0)) continue;
     if(mine.length >= JOB_BOARD_MAX){
-      const stale = mine.filter(j=>j.id!==selectedJob && !jobStatus(j).can).sort((x,y)=>(x.posted||0)-(y.posted||0))[0];
+      const stale = mine.filter(j=>j.id!==selectedJob && !j.contract && !jobStatus(j).can).sort((x,y)=>(x.posted||0)-(y.posted||0))[0];
       if(!stale){ S[timer] = S.clock + JOB_EVERY_MS; continue; }
       S.jobs = S.jobs.filter(j=>j!==stale);
     }
@@ -859,6 +861,129 @@ function maybeEventJob(j){
 }
 const jobPay = j => Math.round(payFor(j.miles, j.weight, j.cargo, j.urg) * (j.event ? EVENT_PAY_BONUS : 1) * (j.rail ? RAIL_PAY : 1) * (j.air ? AIR_PAY : 1));
 
+/* ---------------- Contracts ----------------
+   A contract is a deal with one shipper: deliver a set number of loads before the deadline and earn a
+   completion bonus on top of each load's normal pay. Contract loads post on the truck board a few at a time. */
+const CONTRACT_KINDS = {
+  general:      {n:"General freight", cargo:"general",      lvl:1},
+  furniture:    {n:"Furniture",       cargo:"furniture",    lvl:2},
+  refrigerated: {n:"Refrigerated",    cargo:"refrigerated", lvl:5},
+  event:        {n:"Event",           cargo:"general",      lvl:1}
+};
+const CONTRACT_SIZES = {
+  small:  {n:"Small",  loads:5,  hours:1,   bonus:0.4, xp:1.5, lvl:1},
+  medium: {n:"Medium", loads:12, hours:2.5, bonus:0.6, xp:2,   lvl:4},
+  large:  {n:"Large",  loads:25, hours:6,   bonus:0.8, xp:2.5, lvl:8}
+};
+const CONTRACT_OFFERS = 4, CONTRACT_REFRESH = 3*3600e3, CONTRACT_ON_BOARD = 3;
+const maxContracts = () => level()>=20 ? 3 : level()>=10 ? 2 : 1;
+const contractTypes = c => TYPES.filter(t=>t.cargo.includes(CONTRACT_KINDS[c.kind].cargo) && !t.cars);
+const canRunContract = c => trucks().some(v=>contractTypes(c).some(t=>t.id===v.type));
+function ensureContracts(){
+  S.contracts ||= {offers:[], active:[], done:0, failed:0, nextAt:0};
+  const C = S.contracts;
+  if(S.clock >= C.nextAt || !C.offers.length){
+    C.offers = []; for(let i=0; i<CONTRACT_OFFERS*3 && C.offers.length<CONTRACT_OFFERS; i++){ const o = makeOffer(); if(o) C.offers.push(o); }
+    C.nextAt = S.clock + CONTRACT_REFRESH;
+  }
+  return C;
+}
+function makeOffer(){
+  const L = level(), ev = activeEvent();
+  const kinds = Object.keys(CONTRACT_KINDS).filter(k=>CONTRACT_KINDS[k].lvl<=L && (k!=="event" || ev));
+  const kind = ev && Math.random()<0.35 ? "event" : pick(kinds.filter(k=>k!=="event"));
+  const sizes = Object.keys(CONTRACT_SIZES).filter(k=>CONTRACT_SIZES[k].lvl<=L), size = pick(sizes), sz = CONTRACT_SIZES[size];
+  const cargo = CONTRACT_KINDS[kind].cargo;
+  const types = TYPES.filter(t=>t.lvl<=L && t.cargo.includes(cargo) && !t.cars); if(!types.length) return null;
+  const owned = types.filter(t=>trucks().some(v=>v.type===t.id));
+  const t = (owned.length ? owned : types).sort((a,b)=>b.cap-a.cap)[0];   // sized to the biggest suitable truck you have
+  const base = pick(S.bases), bp = basePt(base);
+  const from = offsetPt(bp.lat, bp.lon, rnd(2, Math.min(25, rangeMi()*0.5)), rnd(0,6.28));
+  const it = kind==="event" ? pick(ev.items) : null;
+  from.biz = it ? it.from : pick(PRODUCERS[cargo]); from.c = nearestCity(from); from.name = bizName(from.biz); from.num = houseNo();
+  const avgW = t.cap*0.55, avgMi = Math.min(120, t.leg*0.4);
+  const per = payFor(avgMi, avgW, cargo, "standard") * (kind==="event" ? EVENT_PAY_BONUS : 1);
+  return {id:nid("c"), kind, size, cargo, type:t.id, base:base.id, from, item:it?.item, to:it?.to, event: kind==="event" ? ev.key : null, evColor: ev?.color,
+    loads:sz.loads, hours:sz.hours, bonus:Math.round(per*sz.loads*sz.bonus/100)*100, estPay:Math.round(per*sz.loads/100)*100};
+}
+function acceptContract(id){
+  const C = ensureContracts(), o = C.offers.find(x=>x.id===id); if(!o || C.active.length>=maxContracts() || !canRunContract(o)) return;
+  C.offers = C.offers.filter(x=>x!==o);
+  Object.assign(o, {accepted:S.clock, deadline:S.clock + o.hours*3600e3, posted:0, delivered:0});
+  C.active.push(o);
+  for(let i=0;i<CONTRACT_ON_BOARD;i++) spawnContractJob(o);
+  logEvent(`Accepted a contract with <b>${esc(o.from.name)}</b>: ${o.loads} ${esc(contractWhat(o))} loads in ${o.hours} h`);
+  toast(`Contract accepted: <b>${esc(o.from.name)}</b>. Its loads are on the Truck jobs board.`, 4500);
+}
+const contractWhat = c => c.item ? c.item.toLowerCase() : CARGO[c.cargo].n.toLowerCase();
+function spawnContractJob(c){
+  const open = S.jobs.filter(j=>j.contract===c.id).length;
+  if(c.posted - c.delivered - inTransit(c) >= CONTRACT_ON_BOARD || c.posted >= c.loads || open >= CONTRACT_ON_BOARD) return null;
+  const t = TYPE[c.type], cargo = c.cargo;
+  const from = {...c.from}, maxLeg = Math.min(t.leg*0.85, 250);
+  const cand = CITIES.filter(x=>{ const m = hav(from,x)*1.2; return m>=15 && m<=maxLeg; });
+  let to;
+  if(cand.length && Math.random()<0.75){ const dc = pick(cand); to = {c:dc.i, ...offsetPt(dc.lat, dc.lon, rnd(0.5,4), rnd(0,6.28))}; }
+  else { to = offsetPt(from.lat, from.lon, rnd(4,20), rnd(0,6.28)); to.c = nearestCity(to); }
+  to.biz = c.to ? pick(c.to) : pick(ACCEPTORS[cargo]); to.name = bizName(to.biz); to.num = houseNo();
+  const weight = Math.max(300, Math.round(rnd(0.35, 0.8)*t.cap/50)*50);
+  const j = {id:nid("j"), base:c.base, cargo, weight, miles:estMi(from,to), urg:"standard", from, to, posted:S.clock, expires:null, routed:false, contract:c.id};
+  if(c.event){ j.event = c.event; j.item = c.item; j.evColor = c.evColor; }
+  j.pay = jobPay(j); S.jobs.push(j); c.posted++;
+  if(!simulating) routeJob(j);
+  return j;
+}
+const inTransit = c => S.trips.reduce((n,tr)=>n + tr.loads.filter(l=>!l.delivered && l.job.contract===c.id).length, 0);
+// Called on every delivery.
+function contractDelivered(j){
+  if(!j.contract || !S.contracts) return;
+  const c = S.contracts.active.find(x=>x.id===j.contract); if(!c) return;
+  c.delivered++;
+  if(c.delivered >= c.loads){
+    const xp = Math.round(c.bonus/100 * CONTRACT_SIZES[c.size].xp);
+    S.cash += c.bonus; S.earned += c.bonus; S.xp += xp; S.contracts.done++;
+    S.contracts.active = S.contracts.active.filter(x=>x!==c);
+    logEvent(`Contract complete for <b>${esc(c.from.name)}</b>: bonus <span class="num">+${money(c.bonus)}</span>, +${xp} XP`, awayLog ? simWhen() : undefined);
+    if(!awayLog) toast(`Contract complete! <b>${esc(c.from.name)}</b> paid a <span class="num">${money(c.bonus)}</span> bonus (+${xp} XP)`, 6000);
+  } else spawnContractJob(c);
+}
+// Runs with the game loop: refresh offers, top up contract loads, end contracts that ran out of time.
+function contractTick(){
+  if(!S) return false;
+  const C = ensureContracts(); let changed = false;
+  for(const c of [...C.active]){
+    if(S.clock > c.deadline){
+      C.active = C.active.filter(x=>x!==c); C.failed++;
+      if(S.jobs.some(j=>j.contract===c.id && j.id===selectedJob)) selectedJob = null;
+      S.jobs = S.jobs.filter(j=>j.contract!==c.id);
+      logEvent(`Contract with <b>${esc(c.from.name)}</b> ran out of time at ${c.delivered}/${c.loads} loads. No bonus.`, awayLog ? simWhen() : undefined);
+      changed = true; continue;
+    }
+    if(spawnContractJob(c)) changed = true;
+  }
+  return changed;
+}
+function renderContracts(){
+  const C = ensureContracts(), t = S.clock, room = maxContracts() - C.active.length;
+  let h = `<section class="sec"><h2>Contracts</h2><p class="hint">Sign a deal with one shipper: deliver all its loads before the deadline and earn a bonus on top of the normal pay for each load, plus extra XP. Contract loads post on the Truck jobs board a few at a time. Run out of time and you keep the pay for loads delivered, but lose the bonus.</p>
+    <p class="hint">You can run ${maxContracts()} contract${maxContracts()>1?"s":""} at a time${level()<20?` (more at level ${level()<10?10:20})`:""}. Completed: ${C.done}${C.failed?` · Missed: ${C.failed}`:""}</p></section>`;
+  if(C.active.length) h += `<section class="sec ${cz("c-active")}">${secHead("c-active","Active",`<span class="hint num">${C.active.length}</span>`)}<div class="list">${C.active.map(c=>{
+    const left = c.deadline - t, pct = c.delivered/c.loads*100, board = S.jobs.filter(j=>j.contract===c.id).length, moving = inTransit(c), conf = pendingConfirm===("drop"+c.id);
+    return `<div class="card" style="${c.evColor&&c.event?`border-left:4px solid ${c.evColor}`:""}"><div class="row"><b>${esc(c.from.name)}</b><span class="pay">+${money(c.bonus)} bonus</span></div>
+      <div class="meta"><span>${CONTRACT_SIZES[c.size].n} · ${esc(c.item||CONTRACT_KINDS[c.kind].n)}</span><span>${esc(addrLine(c.from))}</span></div>
+      <div class="prog"><i style="width:${pct}%"></i></div>
+      <div class="meta"><span class="num">${c.delivered} / ${c.loads} delivered</span><span>${moving} on the road · ${board} on the board</span><span>time left <b class="num" data-exp="${c.deadline}">${dur(left)}</b></span></div>
+      <div class="btnrow"><button class="btn ghost sm" data-act="tab" data-tab="jobs">See loads on Truck jobs</button>${conf?`<button class="btn warn sm" data-act="dropContract" data-id="${c.id}">Give up contract</button><button class="btn ghost sm" data-act="cancel">Keep it</button>`:`<button class="btn ghost sm" data-act="askDrop" data-id="${c.id}">Give up</button>`}</div></div>`; }).join("")}</div></section>`;
+  h += `<section class="sec ${cz("c-offers")}">${secHead("c-offers","Offers",`<span class="hint">new offers in ${longDur(Math.max(0, C.nextAt - t)/S.speed)}</span>`)}<div class="list">${C.offers.map(o=>{
+    const ok = canRunContract(o), types = contractTypes(o).filter(x=>x.lvl<=level()).map(x=>x.n.toLowerCase()), xp = Math.round(o.bonus/100*CONTRACT_SIZES[o.size].xp);
+    return `<div class="card"><div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${o.event?`<span class="chip evchip" style="--ev:${o.evColor}"><i></i>${esc(o.item)} · +25%</span>`:""}${cargoChip(o.cargo)}<span class="chip">${CONTRACT_SIZES[o.size].n}</span></div><span class="pay">+${money(o.bonus)} bonus</span></div>
+      <div class="route"><b>${esc(o.from.name)}</b> · ${esc(o.from.biz)}<br><span class="hint">${esc(addrLine(o.from))}</span></div>
+      <div class="meta"><span class="num">${o.loads} loads</span><span class="num">${o.hours} h to finish</span><span class="num">about ${money(o.estPay)} in load pay</span><span class="num">+${xp} XP on completion</span></div>
+      ${ok ? `<div class="btnrow"><button class="btn sm" data-act="acceptContract" data-id="${o.id}" ${room<=0?"disabled":""}>${room<=0?"Contract limit reached":"Accept contract"}</button></div>`
+           : `<p class="need" style="margin:0">Needs a ${esc(types[0]||"suitable truck")}${types.length>1?` or ${esc(types.slice(1).join(" or "))}`:""}. Buy one in the Shop.</p>`}</div>`; }).join("")}</div></section>`;
+  return h;
+}
+
 /* ---------------- Tasks tab ---------------- */
 function bar(p, t, color){ return `<div class="prog"><i style="width:${Math.min(100, p/t*100)}%;${color?`background:${color}`:""}"></i></div>`; }
 function renderTasks(){
@@ -1094,6 +1219,7 @@ $("#zHome").onclick=()=>{ if(S){ const p=basePt(S.bases[0]); map.flyTo([p.lat,p.
 $("#zArea").onclick=()=>{ if(S){ const b=L.latLngBounds(S.bases.map(x=>{const p=basePt(x);return [p.lat,p.lon];})); map.flyToBounds(b.pad(0.1).extend(L.latLng(b.getNorth()+rangeMi()/MI_DEG, b.getEast()+rangeMi()/MI_DEG)).extend(L.latLng(b.getSouth()-rangeMi()/MI_DEG, b.getWest()-rangeMi()/MI_DEG)), {duration:.6}); } };
 
 /* ---------------- Panel ---------------- */
+function contractChip(j){ const c = S.contracts?.active.find(x=>x.id===j.contract); return c ? `<span class="chip contractchip"><i></i>Contract · ${esc(c.from.name)} ${c.delivered}/${c.loads}</span>` : ""; }
 function evChip(j){ return `<span class="chip evchip" style="--ev:${j.evColor||"#7b3fb5"}"><i></i>${esc(j.item||"Event load")} · +25%</span>`; }
 // What a rail job needs, with what you already have.
 function railNeeds(j){
@@ -1108,7 +1234,7 @@ function cargoChip(c){ return `<span class="chip" style="color:var(--c-${c})"><i
 function urgTag(u){ return !URG[u] || u==="standard" ? "" : `<span class="urg ${u}" title="${URG[u].pay}× pay, ${URG[u].xp}× XP">${u} · ${URG[u].xp}× XP</span>`; }
 // XP for a delivery: 1 per $100 of pay, doubled for priority and tripled for express.
 const jobXp = j => j.pay/100 * (URG[j.urg]||URG.standard).xp;
-const MENU_PAGES = {fleet:"Fleet", shop:"Shop", crew:"Crew", tasks:"Tasks", log:"Log", company:"Company", settings:"Settings"};
+const MENU_PAGES = {fleet:"Fleet", contracts:"Contracts", shop:"Shop", crew:"Crew", tasks:"Tasks", log:"Log", company:"Company", settings:"Settings"};
 function markTabs(){
   document.querySelectorAll(".tab[data-tab]").forEach(b=>b.setAttribute("aria-selected", b.dataset.tab===tab));
   const inMenu = tab in MENU_PAGES;
@@ -1137,7 +1263,7 @@ function goals(){
 function jobCard(j){
   const st = jobStatus(j), local = j.from.c===j.to.c;
   return `<button class="card ${j.id===selectedJob?"sel":""} ${st.can?"":"dim"}" data-act="sel" data-id="${j.id}">
-    <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${j.rail?`<span class="chip railchip"><i></i>Rail</span>`:""}${j.air?`<span class="chip airchip"><i></i>Air · ${esc(j.from.airport)} → ${esc(j.to.airport)}</span>`:""}${j.event?evChip(j):""}${cargoChip(j.cargo)}${urgTag(j.urg)}</div><span class="pay">${money(j.pay)}</span></div>
+    <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${j.rail?`<span class="chip railchip"><i></i>Rail</span>`:""}${j.air?`<span class="chip airchip"><i></i>Air · ${esc(j.from.airport)} → ${esc(j.to.airport)}</span>`:""}${j.contract?contractChip(j):""}${j.event?evChip(j):""}${cargoChip(j.cargo)}${urgTag(j.urg)}</div><span class="pay">${money(j.pay)}</span></div>
     <div class="route"><b>${esc(j.from.name||j.from.biz)}</b> <span class="arrow">→</span> <b>${esc(j.to.name||j.to.biz)}</b><br><span class="hint">${esc(addrLine(j.from))} → ${esc(addrLine(j.to))}</span></div>
     <div class="meta"><span class="num">${weightStr(j)}</span><span class="num">${j.routed?"":"about "}${j.miles} mi</span><span class="num">+${Math.round(jobXp(j))} XP</span>${j.expires?`<span>expires in <span class="num" data-exp="${j.expires}">${dur(j.expires-S.clock)}</span></span>`:""}</div>
     ${st.can?`<span class="ok">${st.opts.length} vehicle${st.opts.length>1?"s":""} available · fastest delivers in ${dur(st.opts[0].r.plan.deliverIn)}</span>`:j.rail?railNeeds(j):`<span class="need">${esc(st.why)}</span>`}
@@ -1194,7 +1320,7 @@ function dispatchCard(j){
     opts = `<p class="need" style="font-size:13px;margin:0">${esc(st.why)}</p><div class="btnrow"><button class="btn ghost" data-act="unsel">Close</button>${st.soon?"":`<button class="btn ghost" data-act="tab" data-tab="shop">Open shop</button>`}</div>`;
   }
   return `<section class="dispatch" aria-label="Dispatch job">
-    <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${j.rail?`<span class="chip railchip"><i></i>Rail</span>`:""}${j.air?`<span class="chip airchip"><i></i>Air · ${esc(j.from.airport)} → ${esc(j.to.airport)}</span>`:""}${j.event?evChip(j):""}${cargoChip(j.cargo)}${urgTag(j.urg)}</div><span class="pay" style="font-size:18px">${money(j.pay)}</span></div>
+    <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${j.rail?`<span class="chip railchip"><i></i>Rail</span>`:""}${j.air?`<span class="chip airchip"><i></i>Air · ${esc(j.from.airport)} → ${esc(j.to.airport)}</span>`:""}${j.contract?contractChip(j):""}${j.event?evChip(j):""}${cargoChip(j.cargo)}${urgTag(j.urg)}</div><span class="pay" style="font-size:18px">${money(j.pay)}</span></div>
     <div class="leg"><span class="dot"></span><span><b>${esc(j.from.name||j.from.biz)}</b> · ${esc(j.from.biz)}<br><span class="hint">${esc(addrLine(j.from))}</span></span>
       <span class="line"></span><span class="hint"><span class="num">${weightStr(j)}</span> · <span class="num">${j.miles} mi</span> ${j.routing?(j.rail?"· checking track":"· checking roads"):j.path?(j.air?"by air":j.rail?"by rail":"by road"):"(estimate)"}</span>
       <span class="dot end"></span><span><b>${esc(j.to.name||j.to.biz)}</b> · ${esc(j.to.biz)}<br><span class="hint">${esc(addrLine(j.to))}</span></span></div>
@@ -1575,7 +1701,7 @@ function renderPanel(){
   if(!S) return;
   const body = $("#panelBody"), st = body.scrollTop;
   const ae = document.activeElement, keep = ae && ae.id && body.contains(ae) && ae.tagName==="INPUT" ? {id:ae.id, v:ae.value, a:ae.selectionStart, b:ae.selectionEnd} : null;
-  body.innerHTML = tab==="jobs"?renderJobs("truck"):tab==="rail"?renderJobs("rail"):tab==="air"?renderJobs("air"):tab==="fleet"?renderFleet():tab==="shop"?renderShop():tab==="crew"?renderCrew():tab==="log"?renderLog():tab==="tasks"?renderTasks():tab==="settings"?renderSettings():renderCompany();
+  body.innerHTML = tab==="jobs"?renderJobs("truck"):tab==="rail"?renderJobs("rail"):tab==="air"?renderJobs("air"):tab==="fleet"?renderFleet():tab==="shop"?renderShop():tab==="crew"?renderCrew():tab==="log"?renderLog():tab==="tasks"?renderTasks():tab==="settings"?renderSettings():tab==="contracts"?renderContracts():renderCompany();
   body.scrollTop = st;
   if(Date.now() < flash.until) document.getElementById("vc-"+flash.id)?.classList.add("flash");
   if(keep){ const el = document.getElementById(keep.id); if(el){ el.value = keep.v; el.focus(); try{ el.setSelectionRange(keep.a, keep.b); }catch(_){} } }
@@ -1602,6 +1728,9 @@ $("#panelBody").addEventListener("click", e=>{
   const a = el.dataset.act, id = el.dataset.id;
   if(a==="sel"){ selectJob(id, true); return; }
   if(a==="fly"){ const j=S.jobs.find(x=>x.id===id); if(j) fitJob(j); return; }
+  if(a==="acceptContract"){ acceptContract(id); save(); drawJobs(); refresh(); return; }
+  if(a==="askDrop"){ pendingConfirm="drop"+id; renderPanel(); return; }
+  if(a==="dropContract"){ const C=ensureContracts(), c=C.active.find(x=>x.id===id); if(c){ c.deadline = S.clock - 1; contractTick(); pendingConfirm=null; save(); drawJobs(); refresh(); } return; }
   if(a==="viewTrip"){ viewTrip(id); return; }
   if(a==="sortDir"){ jobSort.dir = jobSort.dir==="asc" ? "desc" : "asc"; saveSort(); renderPanel(); return; }
   if(a==="unsel"){ selectedJob=null; drawJobs(); renderPanel(); return; }
