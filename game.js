@@ -325,11 +325,13 @@ const roomStr = (t, n) => t.cars ? `${n} of ${t.cap} cars` : `${n.toLocaleString
 // Planes: 3 min + 1 min per 100 miles loaded, twice as fast empty.
 const legMs = (mi, loaded, type) => type.mode==="plane" ? (loaded ? (3 + mi/100)*MIN : Math.max(0.5*MIN, mi/200*MIN)) : type.mode==="train" ? (loaded ? (5 + mi/25)*MIN : Math.max(0.5*MIN, mi/50*MIN)) : loaded ? driveMs(mi, type.slow, 1) : Math.max(0.2*MIN, mi/30/2*MIN);
 
-// Builds the stops and drives for a vehicle from time t, optionally with one more job. Changes nothing.
+// Builds the stops and drives for a vehicle from time t, optionally with more jobs (one job or a list). Changes nothing.
 function planRoute(v, tr, extra, t){
   const type = TYPE[v.type], hub = homePt(v);
   const loads = (tr ? tr.loads.map(l=>({...l})) : []);
-  if(extra) loads.push({job:extra, picked:false, delivered:false});
+  const extras = !extra ? [] : Array.isArray(extra) ? extra : [extra];
+  extras.forEach(x=>loads.push({job:x, picked:false, delivered:false}));
+  extra = extras[0];
   let pos = hub, t0 = t, kept = [];
   if(tr){
     const s = segAt(tr, t);
@@ -1153,12 +1155,18 @@ function extraLoadsList(j, v){
   if(!cands.length) return "";
   const picked = cands.filter(x=>extraSel.has(x.id));
   const used = usedRoom(tr) + j.weight + picked.reduce((n,x)=>n+x.weight, 0);
+  // Timing: the trip with what's ticked now, and how much each unticked job would add to it.
+  const now = S.clock, base = planRoute(v, tr, [j, ...picked], now), alone = planRoute(v, tr, [j], now);
+  const deliverIn = x => { const d = base.dropOf(x.id); return d ? d.t1 - now : 0; };
+  const addTime = x => planRoute(v, tr, [j, ...picked, x], now).endAt - base.endAt;
+  const home = isTrain(v) ? "its yard" : isPlane(v) ? "its home airport" : "the hub";
+  const summary = picked.length ? `<p class="hint" style="margin:0;color:var(--ink)">With ${picked.length+1} loads: this load delivers in ${dur(deliverIn(j))}, back at ${home} in ${dur(base.endAt-now)} (+${dur(Math.max(0, base.endAt-alone.endAt))} for the added loads).</p>` : "";
   const loads = openLoads(tr).length + 1 + picked.length;
   return `<div class="extras"><div class="row"><b>Add more loads to this trip</b><span class="hint num">${roomStr(t, used)}</span></div>
     ${cands.map(x=>{ const on = extraSel.has(x.id), fits = on || (used + x.weight <= t.cap && loads < MAX_LOADS);
       return `<label class="opt ${fits?"":"dim"}"><input type="checkbox" name="extra" value="${x.id}" ${on?"checked":""} ${fits?"":"disabled"}>
-        <span><b>${esc(x.from.name||x.from.biz)}</b> → ${esc(x.to.name||x.to.biz)}<small>${weightStr(x)} · ${x.miles} mi · pickup ${Math.round(hav(j.from,x.from))} mi from this one${fits?"":" · no room"}</small></span>
-        <span class="pay">${money(x.pay)}</span></label>`; }).join("")}</div>`;
+        <span><b>${esc(x.from.name||x.from.biz)}</b> → ${esc(x.to.name||x.to.biz)}<small>${weightStr(x)} · ${x.miles} mi · pickup ${Math.round(hav(j.from,x.from))} mi from this one${on?` · delivers in ${dur(deliverIn(x))}`:fits?` · adds ${dur(Math.max(0, addTime(x)))} to the trip`:" · no room"}</small></span>
+        <span class="pay">${money(x.pay)}</span></label>`; }).join("")}${summary}</div>`;
 }
 function dispatchCard(j){
   const st = jobStatus(j), local = j.from.c===j.to.c;
