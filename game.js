@@ -564,6 +564,7 @@ function logic(){
     }
     const nj = spawn(pick(S.bases)); S[timer] = S.clock + (mine.length<=1 && kind!=="truck" ? 5000 : JOB_EVERY_MS); changed = true;
     if(nj && !simulating && !awayLog){
+      if(jobStatus(nj).can) chime(kind);
       if(kind==="rail") toast(`New rail job: <b>${esc(nj.from.name)}</b> to ${esc(nj.to.name)} · <span class="num">${money(nj.pay)}</span>`, 3500);
       else if(kind==="air") toast(`New air cargo job: <b>${esc(nj.from.airport)}</b> to <b>${esc(nj.to.airport)}</b> · <span class="num">${money(nj.pay)}</span>`, 3500);
       else toast(`New ${nj.event?esc(nj.item.toLowerCase())+" ":""}job: <b>${esc(nj.from.name)}</b> in ${esc(cityName(nj.from.c))} · <span class="num">${money(nj.pay)}</span>`, 3000);
@@ -1649,12 +1650,36 @@ function applyHeaderColor(hex){
   r.setProperty("--hdr-line", `color-mix(in srgb, ${hex} 55%, ${light ? "#000" : "#fff"})`);
 }
 function setHeaderColor(hex){ try{ hex ? localStorage.setItem("freight-dispatch-header", hex) : localStorage.removeItem("freight-dispatch-header"); }catch(_){} applyHeaderColor(hex); }
+/* New-job chime, made with Web Audio (no sound files). Browsers only allow sound after you tap the page once. */
+let audioCtx = null, lastChime = 0;
+function soundOn(){ try{ return localStorage.getItem("freight-dispatch-sound") !== "off"; }catch(_){ return true; } }
+function unlockAudio(){ try{ audioCtx ||= new (window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state==="suspended") audioCtx.resume(); }catch(_){} }
+document.addEventListener("pointerdown", unlockAudio, {passive:true});
+document.addEventListener("keydown", unlockAudio);
+function chime(kind, force){
+  if(!force && (!soundOn() || Date.now()-lastChime < 4000)) return;
+  if(!audioCtx || audioCtx.state!=="running") return;
+  lastChime = Date.now();
+  const notes = kind==="air" ? [784, 1175] : kind==="rail" ? [523, 659] : [659, 988];   // two quick notes, a different pair per board
+  const t0 = audioCtx.currentTime;
+  notes.forEach((f, i)=>{
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain(), t = t0 + i*0.13;
+    o.type = "sine"; o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.18, t+0.015); g.gain.exponentialRampToValueAtTime(0.0001, t+0.35);
+    o.connect(g).connect(audioCtx.destination); o.start(t); o.stop(t+0.4);
+  });
+}
 function renderSettings(){
   const cur = (headerColor() || HEADER_COLORS[0][1]).toLowerCase();
   return `<section class="sec"><h2>Settings</h2><p class="hint">Settings are saved in this browser.</p></section>
     <section class="sec"><h3>Truck job range</h3>
       <p class="hint">How far from a hub truck pickups can be. New truck jobs post inside this ring, and a truck only takes pickups within this distance of its own hub. Deliveries can still go farther. Trains and planes keep their own ranges.</p>
       <div class="seg" role="group" aria-label="Truck job range">${RANGE_OPTS.map(m=>`<button data-act="range" data-m="${m}" aria-pressed="${rangeMi()===m}">${m} mi</button>`).join("")}</div>
+    </section>
+    <section class="sec"><h3>Sounds</h3>
+      <p class="hint">Plays a chime when a new job posts that one of your vehicles can take right now. Phones on silent stay quiet.</p>
+      <div class="seg" role="group" aria-label="New job sound">${[["on","On"],["off","Off"]].map(([k,n])=>`<button data-act="sound" data-v="${k}" aria-pressed="${soundOn()===(k==="on")}">${n}</button>`).join("")}</div>
+      <div class="btnrow"><button class="btn ghost sm" data-act="testSound">Play test sound</button></div>
     </section>
     <section class="sec"><h3>Header color</h3>
       <div class="swatches">${HEADER_COLORS.map(([n,c])=>`<button class="swatch" data-act="hdrColor" data-c="${c}" aria-pressed="${cur===c.toLowerCase()}"><i style="background:${c}"></i>${n}</button>`).join("")}</div>
@@ -1807,6 +1832,8 @@ $("#panelBody").addEventListener("click", e=>{
   if(a==="addCash"){ if(!S.test) return; const n = +el.dataset.n; S.cash += n; logEvent(`Test mode: added ${money(n)}`); save(); refresh(); return; }
   if(a==="toggleSec"){ const k = el.dataset.k; collapsed.has(k) ? collapsed.delete(k) : collapsed.add(k); try{ localStorage.setItem("freight-dispatch-collapsed", JSON.stringify([...collapsed])); }catch(_){} renderPanel(); return; }
   if(a==="range"){ const m=+el.dataset.m; if(RANGE_OPTS.includes(m)){ S.range=m; pruneOutOfRange(); drawBases(); drawJobs(); save(); refresh(); toast(`Truck jobs now post within ${m} mi of your hubs`); } return; }
+  if(a==="sound"){ try{ localStorage.setItem("freight-dispatch-sound", el.dataset.v); }catch(_){} renderPanel(); return; }
+  if(a==="testSound"){ unlockAudio(); setTimeout(()=>chime("truck", true), 50); return; }
   if(a==="hdrColor"){ setHeaderColor(el.dataset.c); renderPanel(); return; }
   if(a==="askSell"){ pendingConfirm="sell"+id; renderPanel(); return; }
   if(a==="sell"){ const v=S.vehicles.find(x=>x.id===id); if(v&&!tripOf(v)){S.cash+=vehValue(v)*0.6; S.vehicles=S.vehicles.filter(x=>x!==v);} pendingConfirm=null; save(); refresh(); return; }
