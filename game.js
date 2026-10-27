@@ -876,6 +876,8 @@ const CONTRACT_SIZES = {
   large:  {n:"Large",  loads:25, hours:6,   bonus:0.8, xp:2.5, lvl:8}
 };
 const CONTRACT_OFFERS = 4, CONTRACT_REFRESH = 3*3600e3, CONTRACT_ON_BOARD = 3;
+const CONTRACTS_PER_DAY = 4;   // contracts you can accept each day (resets at midnight)
+function contractsToday(){ const C = S.contracts; if(C.day !== dayKey()){ C.day = dayKey(); C.today = 0; } return C.today; }
 const maxContracts = () => level()>=20 ? 3 : level()>=10 ? 2 : 1;
 const contractTypes = c => TYPES.filter(t=>t.cargo.includes(CONTRACT_KINDS[c.kind].cargo) && !t.cars);
 const canRunContract = c => trucks().some(v=>contractTypes(c).some(t=>t.id===v.type));
@@ -907,7 +909,8 @@ function makeOffer(){
     loads:sz.loads, hours:sz.hours, bonus:Math.round(per*sz.loads*sz.bonus/100)*100, estPay:Math.round(per*sz.loads/100)*100};
 }
 function acceptContract(id){
-  const C = ensureContracts(), o = C.offers.find(x=>x.id===id); if(!o || C.active.length>=maxContracts() || !canRunContract(o)) return;
+  const C = ensureContracts(), o = C.offers.find(x=>x.id===id); if(!o || C.active.length>=maxContracts() || contractsToday()>=CONTRACTS_PER_DAY || !canRunContract(o)) return;
+  C.today++;
   C.offers = C.offers.filter(x=>x!==o);
   Object.assign(o, {accepted:S.clock, deadline:S.clock + o.hours*3600e3, posted:0, delivered:0});
   C.active.push(o);
@@ -964,9 +967,10 @@ function contractTick(){
   return changed;
 }
 function renderContracts(){
-  const C = ensureContracts(), t = S.clock, room = maxContracts() - C.active.length;
+  const C = ensureContracts(), t = S.clock, used = contractsToday(), dayLeft = CONTRACTS_PER_DAY - used, room = Math.min(maxContracts() - C.active.length, dayLeft);
   let h = `<section class="sec"><h2>Contracts</h2><p class="hint">Sign a deal with one shipper: deliver all its loads before the deadline and earn a bonus on top of the normal pay for each load, plus extra XP. Contract loads post on the Truck jobs board a few at a time. Run out of time and you keep the pay for loads delivered, but lose the bonus.</p>
-    <p class="hint">You can run ${maxContracts()} contract${maxContracts()>1?"s":""} at a time${level()<20?` (more at level ${level()<10?10:20})`:""}. Completed: ${C.done}${C.failed?` · Missed: ${C.failed}`:""}</p></section>`;
+    <p class="hint">You can run ${maxContracts()} contract${maxContracts()>1?"s":""} at a time${level()<20?` (more at level ${level()<10?10:20})`:""}. Completed: ${C.done}${C.failed?` · Missed: ${C.failed}`:""}</p>
+    <p class="hint" style="color:var(--ink)"><b class="num">${used} of ${CONTRACTS_PER_DAY}</b> contracts accepted today${dayLeft<=0?`. New contracts in ${longDur(msToMidnight())}`:" · resets at midnight"}.</p></section>`;
   if(C.active.length) h += `<section class="sec ${cz("c-active")}">${secHead("c-active","Active",`<span class="hint num">${C.active.length}</span>`)}<div class="list">${C.active.map(c=>{
     const left = c.deadline - t, pct = c.delivered/c.loads*100, board = S.jobs.filter(j=>j.contract===c.id).length, moving = inTransit(c), conf = pendingConfirm===("drop"+c.id);
     return `<div class="card" style="${c.evColor&&c.event?`border-left:4px solid ${c.evColor}`:""}"><div class="row"><b>${esc(c.from.name)}</b><span class="pay">+${money(c.bonus)} bonus</span></div>
@@ -979,7 +983,7 @@ function renderContracts(){
     return `<div class="card"><div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${o.event?`<span class="chip evchip" style="--ev:${o.evColor}"><i></i>${esc(o.item)} · +25%</span>`:""}${cargoChip(o.cargo)}<span class="chip">${CONTRACT_SIZES[o.size].n}</span></div><span class="pay">+${money(o.bonus)} bonus</span></div>
       <div class="route"><b>${esc(o.from.name)}</b> · ${esc(o.from.biz)}<br><span class="hint">${esc(addrLine(o.from))}</span></div>
       <div class="meta"><span class="num">${o.loads} loads</span><span class="num">${o.hours} h to finish</span><span class="num">about ${money(o.estPay)} in load pay</span><span class="num">+${xp} XP on completion</span></div>
-      ${ok ? `<div class="btnrow"><button class="btn sm" data-act="acceptContract" data-id="${o.id}" ${room<=0?"disabled":""}>${room<=0?"Contract limit reached":"Accept contract"}</button></div>`
+      ${ok ? `<div class="btnrow"><button class="btn sm" data-act="acceptContract" data-id="${o.id}" ${room<=0?"disabled":""}>${dayLeft<=0?"Daily limit reached":room<=0?"Contract limit reached":"Accept contract"}</button></div>`
            : `<p class="need" style="margin:0">Needs a ${esc(types[0]||"suitable truck")}${types.length>1?` or ${esc(types.slice(1).join(" or "))}`:""}. Buy one in the Shop.</p>`}</div>`; }).join("")}</div></section>`;
   return h;
 }
