@@ -1010,7 +1010,7 @@ function jobCard(j){
     <div class="row"><div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${j.rail?`<span class="chip railchip"><i></i>Rail</span>`:""}${j.air?`<span class="chip airchip"><i></i>Air · ${esc(j.from.airport)} → ${esc(j.to.airport)}</span>`:""}${j.event?evChip(j):""}${cargoChip(j.cargo)}${urgTag(j.urg)}</div><span class="pay">${money(j.pay)}</span></div>
     <div class="route"><b>${esc(j.from.name||j.from.biz)}</b> <span class="arrow">→</span> <b>${esc(j.to.name||j.to.biz)}</b><br><span class="hint">${esc(addrLine(j.from))} → ${esc(addrLine(j.to))}</span></div>
     <div class="meta"><span class="num">${weightStr(j)}</span><span class="num">${j.routed?"":"about "}${j.miles} mi</span>${j.expires?`<span>expires in <span class="num" data-exp="${j.expires}">${dur(j.expires-S.clock)}</span></span>`:""}</div>
-    ${st.can?`<span class="ok">${esc(st.opts[0].v.n)} · ${st.opts[0].r.plan.adding?"add to its trip · ":""}delivers in ${dur(st.opts[0].r.plan.deliverIn)}</span>`:j.rail?railNeeds(j):`<span class="need">${esc(st.why)}</span>`}
+    ${st.can?`<span class="ok">${st.opts.length} vehicle${st.opts.length>1?"s":""} available · fastest delivers in ${dur(st.opts[0].r.plan.deliverIn)}</span>`:j.rail?railNeeds(j):`<span class="need">${esc(st.why)}</span>`}
   </button>`;
 }
 function payBreakdown(j){
@@ -1023,12 +1023,18 @@ function dispatchCard(j){
   const st = jobStatus(j), local = j.from.c===j.to.c;
   let opts;
   if(st.can){
-    if(!chosenVeh || !st.opts.find(o=>o.v.id===chosenVeh)) chosenVeh = st.opts[0].v.id;
-    opts = `<div class="opts">${st.opts.map(o=>{const p=o.r.plan;const net=Math.round(j.pay*p.bonus*(1-p.cut));
-      return `<label class="opt"><input type="radio" name="veh" value="${o.v.id}" ${o.v.id===chosenVeh?"checked":""}>
-      <span><b>${esc(o.v.n)}</b> · ${esc(TYPE[o.v.type].n)}<small>${esc(o.r.drivers.map(d=>d.name).join(" + "))} · ${p.adding?`<b>Adds to its current trip</b> (${p.loads} loads, ${capText(o.v, j)}) · `:""}${p.dead>1?`${p.dead} mi to ${isTrain(o.v)?"the pickup yard":isPlane(o.v)?"the pickup airport":"pickup"} · `:""}${p.adding?"":`loading ${dur(p.ld)} · ${isPlane(o.v)?"flight":"drive"} ${dur(p.tHaul)} · unloading ${dur(p.lu)}<br>`}Delivers this load in ${dur(p.deliverIn)}, back at ${isTrain(o.v)?"its yard":isPlane(o.v)?"its home airport":"the hub"} in ${dur(p.total)}${p.adding&&p.extra>0?` (+${dur(p.extra)})`:""}</small></span>
-      <span class="pay" title="Job pay">${money(net)}</span></label>`;}).join("")}</div>
-      <div class="btnrow"><button class="btn" data-act="go" data-id="${j.id}" ${j.routing?"disabled":""}>${j.routing?"Finding route…":"Dispatch"}</button><button class="btn ghost" data-act="unsel">Close</button></div>`;
+    if(chosenVeh && !st.opts.find(o=>o.v.id===chosenVeh)) chosenVeh = null;   // you choose; nothing is picked for you
+    const mode = j.air ? "plane" : j.rail ? "train" : "truck";
+    const others = S.vehicles.filter(v=>(TYPE[v.type].mode||"truck")===mode && !st.opts.find(o=>o.v.id===v.id));
+    const sel = st.opts.find(o=>o.v.id===chosenVeh);
+    opts = `<label class="fld" for="vehPick">Vehicle</label>
+      <select id="vehPick" aria-label="Choose a vehicle for this job">
+        <option value="" ${chosenVeh?"":"selected"}>Choose a vehicle… (${st.opts.length} available)</option>
+        ${st.opts.map(o=>`<option value="${o.v.id}" ${o.v.id===chosenVeh?"selected":""}>${esc(o.v.n)} · ${esc(TYPE[o.v.type].n)}${o.r.plan.adding?" · on a trip, has room":""} · delivers in ${dur(o.r.plan.deliverIn)}</option>`).join("")}
+        ${others.map(v=>`<option disabled>${esc(v.n)} · ${esc(vehicleFor(v,j).why||"Not available")}</option>`).join("")}
+      </select>
+      ${sel ? (o=>{ const p=o.r.plan; return `<div class="opt chosen"><span><b>${esc(o.v.n)}</b> · ${esc(TYPE[o.v.type].n)}<small>${esc(o.r.drivers.map(d=>d.name).join(" + "))} · ${p.adding?`<b>Adds to its current trip</b> (${p.loads} loads, ${capText(o.v, j)}) · `:""}${p.dead>1?`${p.dead} mi to ${isTrain(o.v)?"the pickup yard":isPlane(o.v)?"the pickup airport":"pickup"} · `:""}${p.adding?"":`loading ${dur(p.ld)} · ${isPlane(o.v)?"flight":"drive"} ${dur(p.tHaul)} · unloading ${dur(p.lu)}<br>`}Delivers this load in ${dur(p.deliverIn)}, back at ${isTrain(o.v)?"its yard":isPlane(o.v)?"its home airport":"the hub"} in ${dur(p.total)}${p.adding&&p.extra>0?` (+${dur(p.extra)})`:""}</small></span><span class="pay" title="Job pay">${money(Math.round(j.pay*p.bonus*(1-p.cut)))}</span></div>`; })(sel) : `<p class="hint" style="margin:0">Pick a vehicle to see its timing, then dispatch.</p>`}
+      <div class="btnrow"><button class="btn" data-act="go" data-id="${j.id}" ${j.routing||!sel?"disabled":""}>${j.routing?"Finding route…":"Dispatch"}</button><button class="btn ghost" data-act="unsel">Close</button></div>`;
   } else {
     opts = `<p class="need" style="font-size:13px;margin:0">${esc(st.why)}</p><div class="btnrow"><button class="btn ghost" data-act="unsel">Close</button>${st.soon?"":`<button class="btn ghost" data-act="tab" data-tab="shop">Open shop</button>`}</div>`;
   }
@@ -1460,7 +1466,7 @@ $("#panelBody").addEventListener("click", e=>{
 });
 $("#panelBody").addEventListener("keydown", e=>{ if(e.key==="Enter" && e.target.id?.startsWith("ren-")){ e.preventDefault(); $(`[data-act=ren][data-id="${e.target.id.slice(4)}"]`)?.click(); }
   if(e.key==="Enter" && e.target.id?.startsWith("renh-")){ e.preventDefault(); $(`[data-act=renHub][data-id="${e.target.id.slice(5)}"]`)?.click(); } if(e.key==="Escape" && e.target.id?.startsWith("ren-")){ pendingConfirm=null; renderPanel(); } });
-$("#panelBody").addEventListener("change", e=>{ if(e.target.name==="veh") chosenVeh=e.target.value; if(e.target.id==="hdrCustom"){ setHeaderColor(e.target.value); renderPanel(); } if(e.target.id==="testToggle"){ S.test = e.target.checked; save(); renderPanel(); } });
+$("#panelBody").addEventListener("change", e=>{ if(e.target.name==="veh") chosenVeh=e.target.value; if(e.target.id==="vehPick"){ chosenVeh = e.target.value || null; renderPanel(); } if(e.target.id==="hdrCustom"){ setHeaderColor(e.target.value); renderPanel(); } if(e.target.id==="testToggle"){ S.test = e.target.checked; save(); renderPanel(); } });
 document.querySelectorAll(".tab[data-tab]").forEach(b=>b.addEventListener("click",()=>{ closeMenu(); setTab(b.dataset.tab); }));
 // Menu dropdown for Fleet, Shop, Crew, Tasks, Log and Company
 function closeMenu(){ $("#menu").hidden = true; $("#menuBtn").setAttribute("aria-expanded","false"); }
