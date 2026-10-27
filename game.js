@@ -1284,23 +1284,25 @@ function payBreakdown(j){
 function extraLoadsList(j, v){
   if(isTrain(v)) return "";
   const t = TYPE[v.type], tr = tripOf(v);
-  const cands = S.jobs.filter(x=>x.id!==j.id && jobKind(x)===jobKind(j) && vehicleFor(v,x).ok)
-    .sort((a,b)=>hav(j.from,a.from)-hav(j.from,b.from)).slice(0, 12);
-  for(const id of [...extraSel]) if(!cands.find(x=>x.id===id)) extraSel.delete(id);
-  if(!cands.length) return "";
-  const picked = cands.filter(x=>extraSel.has(x.id));
+  const all = S.jobs.filter(x=>x.id!==j.id && jobKind(x)===jobKind(j) && vehicleFor(v,x).ok)
+    .sort((a,b)=>hav(j.from,a.from)-hav(j.from,b.from));
+  for(const id of [...extraSel]) if(!all.find(x=>x.id===id)) extraSel.delete(id);
+  const picked = all.filter(x=>extraSel.has(x.id));
   const used = usedRoom(tr) + j.weight + picked.reduce((n,x)=>n+x.weight, 0);
+  const nLoads = openLoads(tr).length + 1 + picked.length;
+  // Only list loads that still fit (plus the ones already ticked), nearest pickup first.
+  const cands = all.filter(x=>extraSel.has(x.id) || (used + x.weight <= t.cap && nLoads < MAX_LOADS)).slice(0, 12 + picked.length);
+  if(!cands.length) return all.length ? `<p class="hint" style="margin:0">No other open loads fit in this ${esc(t.n.toLowerCase())} with this one.</p>` : "";
   // Timing: the trip with what's ticked now, and how much each unticked job would add to it.
   const now = S.clock, base = planRoute(v, tr, [j, ...picked], now), alone = planRoute(v, tr, [j], now);
   const deliverIn = x => { const d = base.dropOf(x.id); return d ? d.t1 - now : 0; };
   const addTime = x => planRoute(v, tr, [j, ...picked, x], now).endAt - base.endAt;
   const home = isTrain(v) ? "its yard" : isPlane(v) ? "its home airport" : "the hub";
   const summary = picked.length ? `<p class="hint" style="margin:0;color:var(--ink)">With ${picked.length+1} loads: this load delivers in ${dur(deliverIn(j))}, back at ${home} in ${dur(base.endAt-now)} (+${dur(Math.max(0, base.endAt-alone.endAt))} for the added loads).</p>` : "";
-  const loads = openLoads(tr).length + 1 + picked.length;
   return `<div class="extras"><div class="row"><b>Add more loads to this trip</b><span class="hint num">${roomStr(t, used)}</span></div>
-    ${cands.map(x=>{ const on = extraSel.has(x.id), fits = on || (used + x.weight <= t.cap && loads < MAX_LOADS);
-      return `<label class="opt ${fits?"":"dim"}"><input type="checkbox" name="extra" value="${x.id}" ${on?"checked":""} ${fits?"":"disabled"}>
-        <span><b>${esc(x.from.name||x.from.biz)}</b> → ${esc(x.to.name||x.to.biz)}<small>${weightStr(x)} · ${x.miles} mi · pickup ${Math.round(hav(j.from,x.from))} mi from this one${on?` · delivers in ${dur(deliverIn(x))}`:fits?` · adds ${dur(Math.max(0, addTime(x)))} to the trip`:" · no room"}</small></span>
+    ${cands.map(x=>{ const on = extraSel.has(x.id);
+      return `<label class="opt"><input type="checkbox" name="extra" value="${x.id}" ${on?"checked":""}>
+        <span><b>${esc(x.from.name||x.from.biz)}</b> → ${esc(x.to.name||x.to.biz)}<small>${weightStr(x)} · ${x.miles} mi · pickup ${Math.round(hav(j.from,x.from))} mi from this one${on?` · delivers in ${dur(deliverIn(x))}`:` · adds ${dur(Math.max(0, addTime(x)))} to the trip`}</small></span>
         <span class="pay">${money(x.pay)}</span></label>`; }).join("")}${summary}</div>`;
 }
 function dispatchCard(j){
