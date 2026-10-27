@@ -107,7 +107,9 @@ let selectedJob = null, tab = "jobs", pendingConfirm = null, chosenVeh = null;
 const nid = p => p + (++S.idc);
 const level = () => levelOf(S.xp);
 const baseById = id => S.bases.find(b=>b.id===id);
-const hubCap = b => HUB_TIERS[b.tier||0].cap;
+const hubCap = b => Math.min(HUB_TIERS[b.tier||0].cap, levelSlots(level()));
+// Truck pickups must be within this many miles of the truck's hub (set in Settings).
+const rangeMi = () => RANGE_OPTS.includes(S?.range) ? S.range : DEFAULT_RANGE;
 // Each kind of vehicle has its own job board: one more job than you have of that kind.
 const maxJobs = () => JOB_BOARD_MAX;
 const jobKind = j => j.air ? "air" : j.rail ? "rail" : "truck";
@@ -195,7 +197,7 @@ function spawnJob(base, depth=0){
   if(t.cars) weight = Math.round(rnd(3,9.99));
   else { const lo = cargo==="parcels"?0.15:0.35; weight = Math.max(300, Math.round(rnd(lo,1)*t.cap/50)*50); }
   // Pickups: near the hub or in a city within the hub's job area.
-  const bp = basePt(base), near = citiesNear(base.city, RADIUS_MI);
+  const bp = basePt(base), near = CITIES.filter(c=>hav(bp,c)<=rangeMi()-6).map(c=>c.i);
   let from;
   if(Math.random()<0.45 || !near.length) from = offsetPt(bp.lat, bp.lon, rnd(0.5,4), rnd(0,6.28));
   else { const oc = CITIES[pick(near)]; from = offsetPt(oc.lat, oc.lon, rnd(0.5,4), rnd(0,6.28)); }
@@ -429,7 +431,7 @@ function vehicleFor(v, j){
     ds = (t.lic==="std" || crew.every(d=>d.kind==="cdl" && (j.cargo!=="hazmat"||d.hazmat))) ? crew : null;
     from = llPt(posOf(tr, S.clock).ll);
   } else { ds = freeDrivers(t.lic, j.cargo); from = homePt(v); }
-  if(estMi(from, j.from) > MAX_DEADHEAD) return {ok:false, why:`Over ${MAX_DEADHEAD} mi from the pickup`};
+  if(hav(basePt(baseById(v.base)), j.from) > rangeMi()) return {ok:false, why:`Pickup is over ${rangeMi()} mi from ${baseName(baseById(v.base))}`};
   if(!ds) return {ok:false, why: t.lic==="std"?"No free driver": j.cargo==="hazmat"?"Needs hazmat driver": t.lic==="cdl2"?"Needs 2 free CDL drivers":"No free CDL driver", nodriver:true};
   return {ok:true, drivers:ds, plan:planTrip(v,j)};
 }
@@ -560,7 +562,7 @@ function logic(){
   for(const b of S.bases){
     if(!b.dispatcher) continue;
     for(const v of S.vehicles.filter(x=>x.base===b.id && (!tripOf(x) || !openLoads(tripOf(x)).length))){
-      const best = S.jobs.filter(j=>estMi(basePt(b),j.from)<=RADIUS_MI*1.3 && vehicleFor(v,j).ok).sort((a,c)=>c.pay-a.pay)[0];
+      const best = S.jobs.filter(j=>vehicleFor(v,j).ok).sort((a,c)=>c.pay-a.pay)[0];
       if(best){ dispatch(best, v, true); changed = true; }
     }
   }
@@ -585,9 +587,71 @@ const ALL_TASKS_BONUS = 10000;    // claim after finishing every daily task (fla
 const EVENT_PAY_BONUS = 1.25;     // event loads pay 25% more
 const EVENT_SHARE = 0.35;         // share of new jobs that are event loads while an event runs
 
-/* Seasonal events repeat every year between these month-day dates (inclusive). */
+/* Seasonal events repeat every year. Each one works out its own dates for a given year,
+   so holidays that move (Thanksgiving is the 4th Thursday of November) line up every year. */
+const ymd = (y, m, d) => new Date(y, m-1, d);
+const fixedDates = (sm, sd, em, ed) => y => [ymd(y, sm, sd), ymd(em < sm ? y+1 : y, em, ed)];   // end may fall in the next year
+const nthWeekday = (y, m, wd, n) => { const first = ymd(y, m, 1).getDay(); return ymd(y, m, 1 + (wd - first + 7) % 7 + 7*(n-1)); };
+const thanksgiving = y => nthWeekday(y, 11, 4, 4);
+const MS = [{n:5, reward:2500}, {n:15, reward:7500}, {n:30, reward:20000}, {n:50, reward:40000}];
 const EVENTS = [
-  {id:"halloween", n:"Halloween Haul", start:"10-20", end:"11-01", color:"#7b3fb5",
+  {id:"newyear", n:"New Year Restock", dates:fixedDates(12,31, 1,7), color:"#2f6fb5",
+   blurb:"Stores clear out the holidays and restock shelves for the new year.",
+   items:[
+     {item:"Party supplies",   from:"Party Supply Warehouse", to:["Party Store","Event Hall","Grocery Store"]},
+     {item:"Returned goods",   from:"Department Store",       to:["Returns Center","Liquidation Outlet"]},
+     {item:"Fitness gear",     from:"Sporting Goods Supplier",to:["Gym","Sporting Goods Store"]},
+     {item:"New-year inventory",from:"Distribution Center",   to:["Department Store","Grocery Store"]}
+   ], milestones:MS},
+  {id:"valentines", n:"Valentine's Rush", dates:fixedDates(2,7, 2,14), color:"#d23c6e",
+   blurb:"Flowers, chocolate and gifts have to land before February 14.",
+   items:[
+     {item:"Roses",            from:"Flower Farm",      to:["Florist","Grocery Store"]},
+     {item:"Chocolates",       from:"Candy Factory",    to:["Gift Shop","Grocery Store","Florist"]},
+     {item:"Greeting cards",   from:"Card Printer",     to:["Gift Shop","Pharmacy"]},
+     {item:"Restaurant stock", from:"Food Distributor", to:["Steakhouse","Bistro"]}
+   ], milestones:MS},
+  {id:"spring", n:"Spring Planting", dates:fixedDates(3,15, 4,5), color:"#4a9a3c",
+   blurb:"Farms and garden centers stock up for the growing season.",
+   items:[
+     {item:"Seed",             from:"Seed Company",     to:["Farm Supply Store","Garden Center"], heavy:true},
+     {item:"Fertilizer",       from:"Fertilizer Plant", to:["Farm Supply Store","Farm"], heavy:true},
+     {item:"Nursery plants",   from:"Plant Nursery",    to:["Garden Center","Hardware Store"]},
+     {item:"Mulch",            from:"Mulch Yard",       to:["Garden Center","Landscaper"], heavy:true}
+   ], milestones:MS},
+  {id:"summer", n:"Summer Kickoff", dates:fixedDates(5,20, 6,5), color:"#e08a1e",
+   blurb:"Grills, pool supplies and camping gear for the start of summer.",
+   items:[
+     {item:"Grills",           from:"Grill Maker",       to:["Hardware Store","Department Store"]},
+     {item:"Pool supplies",    from:"Pool Supply Warehouse", to:["Pool Store","Community Pool"]},
+     {item:"Camping gear",     from:"Outdoor Gear Supplier", to:["Sporting Goods Store","Campground"]},
+     {item:"Charcoal",         from:"Charcoal Plant",    to:["Grocery Store","Hardware Store"], heavy:true}
+   ], milestones:MS},
+  {id:"july4", n:"Fourth of July", dates:fixedDates(6,27, 7,5), color:"#c8372a",
+   blurb:"Fireworks shows, cookouts and parades all need supplies.",
+   items:[
+     {item:"Flags and bunting",from:"Flag Maker",       to:["Party Store","Town Hall","Parade Route"]},
+     {item:"Cookout supplies", from:"Food Distributor", to:["Grocery Store","Park Pavilion"]},
+     {item:"Bleachers",        from:"Event Rental Co.", to:["Parade Route","Fairgrounds"], heavy:true},
+     {item:"Ice",              from:"Ice Plant",        to:["Grocery Store","Fairgrounds"], heavy:true}
+   ], milestones:MS},
+  {id:"school", n:"Back to School", dates:fixedDates(8,1, 8,20), color:"#2c8a8a",
+   blurb:"Schools and stores need supplies before the first bell.",
+   items:[
+     {item:"School supplies",  from:"Office Supply Warehouse", to:["School","Department Store"]},
+     {item:"Desks and chairs", from:"Furniture Maker",  to:["School","College"]},
+     {item:"Textbooks",        from:"Book Publisher",   to:["School","College Bookstore"]},
+     {item:"Laptops",          from:"Electronics Distributor", to:["School","Electronics Store"]}
+   ], milestones:MS},
+  {id:"harvest", n:"Harvest Season", dates:fixedDates(9,15, 10,10), color:"#a8741a",
+   blurb:"Orchards and farms bring in the harvest.",
+   items:[
+     {item:"Apples",           from:"Orchard",          to:["Grocery Store","Farmers Market","Cider Mill"], heavy:true},
+     {item:"Corn",             from:"Farm",             to:["Grain Elevator","Farmers Market"], heavy:true},
+     {item:"Squash and gourds",from:"Farm",             to:["Grocery Store","Farmers Market"]},
+     {item:"Canning jars",     from:"Glass Works",      to:["Hardware Store","Grocery Store"]}
+   ], milestones:MS},
+  {id:"halloween", n:"Halloween Haul", dates:fixedDates(10,20, 11,1), color:"#7b3fb5",
    blurb:"Pumpkin patches, candy makers and costume shops need loads delivered before the big night.",
    items:[
      {item:"Pumpkins",           from:"Pumpkin Patch",       to:["Grocery Store","Fall Festival","Farmers Market"], heavy:true},
@@ -597,10 +661,27 @@ const EVENTS = [
      {item:"Hay bales",          from:"Hay Farm",            to:["Corn Maze","Fall Festival","Haunted House"], heavy:true},
      {item:"Fog machines and props", from:"Stage Supply Co.", to:["Haunted House","Theater","Corn Maze"]},
      {item:"Apple cider",        from:"Cider Mill",          to:["Fall Festival","Grocery Store","Farmers Market"]}
-   ],
-   milestones:[{n:5, reward:2500}, {n:15, reward:7500}, {n:30, reward:20000}, {n:50, reward:40000}]}
+   ], milestones:MS},
+  // The week before Thanksgiving through Thanksgiving Day; the dates move every year.
+  {id:"thanksgiving", n:"Thanksgiving Delivery", dates:y=>{ const t = thanksgiving(y); return [ymd(y, 11, t.getDate()-8), t]; }, color:"#b5562a",
+   blurb:"Turkeys, pies and travel supplies have to arrive before Thanksgiving Day.",
+   items:[
+     {item:"Turkeys",          from:"Turkey Farm",      to:["Grocery Store","Food Bank","Butcher Shop"], heavy:true},
+     {item:"Pies",             from:"Bakery",           to:["Grocery Store","Restaurant","Food Bank"]},
+     {item:"Cranberries",      from:"Cranberry Bog",    to:["Grocery Store","Farmers Market"]},
+     {item:"Folding tables",   from:"Event Rental Co.", to:["Community Center","Church Hall"]}
+   ], milestones:MS},
+  {id:"holiday", n:"Holiday Shipping Rush", dates:fixedDates(12,1, 12,24), color:"#1f7a4a",
+   blurb:"The busiest shipping weeks of the year. Get the gifts there before Christmas Eve.",
+   items:[
+     {item:"Gifts",            from:"Distribution Center", to:["Department Store","Toy Store","Electronics Store"]},
+     {item:"Christmas trees",  from:"Tree Farm",        to:["Tree Lot","Garden Center","Hardware Store"], heavy:true},
+     {item:"Toys",             from:"Toy Maker",        to:["Toy Store","Department Store"]},
+     {item:"Holiday parcels",  from:"Parcel Hub",       to:["Post Office","Shipping Store"]}
+   ], milestones:MS}
 ];
-Object.assign(NAME_SUFFIX, {
+// Business names for event stops; names already defined for regular freight stay as they are.
+for(const [k, v] of Object.entries({
   "Pumpkin Patch":["Pumpkin Patch","Pumpkin Farm"], "Candy Factory":["Candy Co.","Confections","Sweets Factory"],
   "Costume Warehouse":["Costume Warehouse","Costume Supply"], "Decoration Supplier":["Seasonal Decor","Party Supply"],
   "Hay Farm":["Hay Farm","Hay & Feed"], "Cider Mill":["Cider Mill","Orchard Cider"],
@@ -608,24 +689,53 @@ Object.assign(NAME_SUFFIX, {
   "Farmers Market":["Farmers Market"], "Party Store":["Party Store","Party Outlet"],
   "Trunk-or-Treat Lot":["Church Trunk-or-Treat","Community Trunk-or-Treat"], "Costume Shop":["Costume Shop","Costumes"],
   "Theater":["Playhouse","Community Theater"], "Haunted House":["Haunted House","Scream Park","Haunted Manor"],
-  "Corn Maze":["Corn Maze","Maze & Hayride"]
-});
+  "Corn Maze":["Corn Maze","Maze & Hayride"],
+  "Party Supply Warehouse":["Party Supply","Celebration Wholesale"], "Event Hall":["Event Hall","Banquet Hall"],
+  "Department Store":["Department Store","Mercantile"], "Returns Center":["Returns Center","Reverse Logistics"],
+  "Liquidation Outlet":["Liquidators","Outlet"], "Sporting Goods Supplier":["Sports Supply","Athletic Wholesale"],
+  "Gym":["Fitness","Gym","Athletic Club"], "Sporting Goods Store":["Sporting Goods","Outfitters"],
+  "Distribution Center":["Distribution Center","Fulfillment Center"],
+  "Flower Farm":["Flower Farm","Rose Growers"], "Florist":["Florist","Flowers","Floral"], "Gift Shop":["Gifts","Gift Shop"],
+  "Card Printer":["Card Co.","Printing"], "Pharmacy":["Pharmacy","Drug Store"], "Food Distributor":["Foodservice","Food Distributors"],
+  "Steakhouse":["Steakhouse","Chophouse"], "Bistro":["Bistro","Kitchen"],
+  "Seed Company":["Seed Co.","Seeds"], "Farm Supply Store":["Farm Supply","Feed & Seed"], "Garden Center":["Garden Center","Nursery & Garden"],
+  "Fertilizer Plant":["Fertilizer","Ag Products"], "Farm":["Farms","Family Farm","Acres"], "Plant Nursery":["Nursery","Greenhouses"],
+  "Hardware Store":["Hardware","Home & Hardware"], "Mulch Yard":["Mulch & Stone","Landscape Supply"], "Landscaper":["Landscaping","Lawn & Garden"],
+  "Grill Maker":["Grill Works","Grills"], "Pool Supply Warehouse":["Pool Supply","Pool Wholesale"], "Pool Store":["Pools & Spas","Pool Store"],
+  "Community Pool":["Community Pool","Aquatic Center"], "Outdoor Gear Supplier":["Outdoor Supply","Gear Wholesale"], "Campground":["Campground","RV Park"],
+  "Charcoal Plant":["Charcoal Co.","Briquettes"], "Flag Maker":["Flag Co.","Banners & Flags"], "Town Hall":["Town Hall","City Hall"],
+  "Parade Route":["Parade Committee","Main Street Parade"], "Park Pavilion":["Park Pavilion","City Park"], "Event Rental Co.":["Event Rentals","Party Rentals"],
+  "Fairgrounds":["Fairgrounds","County Fair"], "Ice Plant":["Ice Co.","Ice House"],
+  "Office Supply Warehouse":["Office Supply","School Supply Wholesale"], "School":["Elementary","High School","Middle School"],
+  "Furniture Maker":["Furniture Co.","Woodworks"], "College":["College","University"], "Book Publisher":["Publishing","Press"],
+  "College Bookstore":["Campus Bookstore","University Books"], "Electronics Distributor":["Electronics Supply","Tech Distribution"],
+  "Electronics Store":["Electronics","Tech Store"], "Orchard":["Orchard","Apple Farm"], "Grain Elevator":["Grain Elevator","Co-op Elevator"],
+  "Glass Works":["Glass Works","Glass Co."], "Turkey Farm":["Turkey Farm","Poultry Farm"], "Food Bank":["Food Bank","Community Pantry"],
+  "Butcher Shop":["Butcher","Meat Market"], "Bakery":["Bakery","Pie Co."], "Restaurant":["Diner","Restaurant","Cafe"],
+  "Cranberry Bog":["Cranberry Bog","Cranberry Farm"], "Community Center":["Community Center","Rec Center"], "Church Hall":["Church Hall","Fellowship Hall"],
+  "Toy Store":["Toys","Toy Store"], "Tree Farm":["Tree Farm","Christmas Trees"], "Tree Lot":["Tree Lot","Christmas Tree Lot"],
+  "Toy Maker":["Toy Co.","Toy Works"], "Parcel Hub":["Parcel Hub","Shipping Hub"], "Post Office":["Post Office"], "Shipping Store":["Ship & Pack","Shipping Store"]
+})) if(!NAME_SUFFIX[k]) NAME_SUFFIX[k] = v;
 
 /* ---------------- Dates ---------------- */
 const dayKey = (d=new Date()) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 const dayBefore = key => { const [y,m,d] = key.split("-").map(Number); return dayKey(new Date(y, m-1, d-1)); };
 function msToMidnight(){ const n = new Date(), m = new Date(n.getFullYear(), n.getMonth(), n.getDate()+1); return m - n; }
+// The event running on date d (if any), with its start and end dates for this run.
+function eventRun(e, y){ const [st, en] = e.dates(y); return {...e, key:`${e.id}-${y}`, startD:st, endD:en}; }
 function activeEvent(d=new Date()){
-  const md = `${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-  const ev = EVENTS.find(e => e.start <= e.end ? (md>=e.start && md<=e.end) : (md>=e.start || md<=e.end));
-  return ev ? {...ev, key:`${ev.id}-${d.getFullYear()}`} : null;
+  const day = new Date(d.getFullYear(), d.getMonth(), d.getDate()), y = d.getFullYear();
+  for(const yy of [y, y-1]) for(const e of EVENTS){ const r = eventRun(e, yy); if(day >= r.startD && day <= r.endD) return r; }
+  return null;
 }
-function eventEndsIn(ev){
-  const n = new Date(), [m,d] = ev.end.split("-").map(Number);
-  let end = new Date(n.getFullYear(), m-1, d+1);
-  if(end < n) end = new Date(n.getFullYear()+1, m-1, d+1);
-  return end - n;
+// Ends at the end of its last day.
+function eventEndsIn(ev){ const e = ev.endD; return new Date(e.getFullYear(), e.getMonth(), e.getDate()+1) - new Date(); }
+// The next few events that haven't started yet.
+function upcomingEvents(n=3, d=new Date()){
+  const day = new Date(d.getFullYear(), d.getMonth(), d.getDate()), y = d.getFullYear();
+  return [y, y+1].flatMap(yy=>EVENTS.map(e=>eventRun(e, yy))).filter(r=>r.startD > day).sort((a,b)=>a.startD-b.startD).slice(0, n);
 }
+const shortDate = d => d.toLocaleDateString("en-US", {month:"short", day:"numeric"});
 function longDur(ms){ const h = Math.floor(ms/3600e3), d = Math.floor(h/24); return d>=1 ? `${d}d ${h%24}h` : `${h}h ${Math.floor(ms/60e3)%60}m`; }
 
 /* ---------------- Daily tasks ---------------- */
@@ -765,6 +875,9 @@ function renderTasks(){
           ${bar(Math.min(e.count,m.n), m.n, ev.color)}
           <div class="row"><span class="hint num">${Math.min(e.count,m.n)} / ${m.n}</span>${got?`<span class="ok">Claimed</span>`:ready?`<button class="btn sm" data-act="claimMs" data-n="${m.n}">Claim</button>`:""}</div></div>`; }).join("")}</div></section>`;
   }
+  const up = upcomingEvents(3);
+  h += `<section class="sec ${cz("upcoming")}">${secHead("upcoming", ev?"Next events":"Upcoming events")}
+    <div class="list">${up.map(u=>`<div class="task" style="--ev:${u.color}"><div class="row"><span><i class="evdot" style="background:${u.color}"></i><b>${esc(u.n)}</b></span><span class="hint num">${shortDate(u.startD)} to ${shortDate(u.endD)}</span></div><p class="hint" style="margin:0">${esc(u.blurb)}</p></div>`).join("")}</div></section>`;
   h += `<section class="sec"><div class="sec-head"><h2>Daily tasks</h2><span class="hint">new tasks in ${longDur(msToMidnight())}</span></div>
     <p class="hint">Finish a task, then claim its reward before midnight. Rewards grow with your level.</p>
     <div class="list">${d.tasks.map(t=>{ const ready = !t.claimed && t.progress>=t.target;
@@ -860,7 +973,7 @@ function drawBases(){
   layerBases.clearLayers(); layerRings.clearLayers();
   S.bases.forEach((b,i)=>{
     const p = basePt(b);
-    L.circle([p.lat,p.lon], {radius:RADIUS_MI*1609.34, color:"#1e5a3c", weight:1.2, opacity:.5, dashArray:"5 6", fill:true, fillOpacity:.03, interactive:false}).addTo(layerRings);
+    L.circle([p.lat,p.lon], {radius:rangeMi()*1609.34, color:"#1e5a3c", weight:1.2, opacity:.5, dashArray:"5 6", fill:true, fillOpacity:.03, interactive:false}).addTo(layerRings);
     L.marker([p.lat,p.lon], {icon:L.divIcon({className:"", html:`<div class="mk-base">${b.home?"HQ":"H"+(i+1)}</div>`, iconSize:[22,22], iconAnchor:[11,11]}), zIndexOffset:500, title:`${baseName(b)} · ${baseAddr(b)}`}).addTo(layerBases);
   });
 }
@@ -968,7 +1081,7 @@ function frame(){
   bt.addEventListener("click", ()=>{ open = !open; set(open); try{ localStorage.setItem("freight-dispatch-key", open?"open":"closed"); }catch(_){} });
 })();
 $("#zHome").onclick=()=>{ if(S){ const p=basePt(S.bases[0]); map.flyTo([p.lat,p.lon], 11, {duration:.6}); } };
-$("#zArea").onclick=()=>{ if(S){ const b=L.latLngBounds(S.bases.map(x=>{const p=basePt(x);return [p.lat,p.lon];})); map.flyToBounds(b.pad(0.1).extend(L.latLng(b.getNorth()+RADIUS_MI/MI_DEG, b.getEast()+RADIUS_MI/MI_DEG)).extend(L.latLng(b.getSouth()-RADIUS_MI/MI_DEG, b.getWest()-RADIUS_MI/MI_DEG)), {duration:.6}); } };
+$("#zArea").onclick=()=>{ if(S){ const b=L.latLngBounds(S.bases.map(x=>{const p=basePt(x);return [p.lat,p.lon];})); map.flyToBounds(b.pad(0.1).extend(L.latLng(b.getNorth()+rangeMi()/MI_DEG, b.getEast()+rangeMi()/MI_DEG)).extend(L.latLng(b.getSouth()-rangeMi()/MI_DEG, b.getWest()-rangeMi()/MI_DEG)), {duration:.6}); } };
 
 /* ---------------- Panel ---------------- */
 function evChip(j){ return `<span class="chip evchip" style="--ev:${j.evColor||"#7b3fb5"}"><i></i>${esc(j.item||"Event load")} · +25%</span>`; }
@@ -1074,7 +1187,7 @@ function activeCard({tr, l, due}){
 }
 function renderJobs(mode="truck"){
   const kind = mode, rail = kind==="rail", air = kind==="air", kp = rail ? "jr-" : air ? "ja-" : "jt-";
-  if(air && level() < AIR_LVL) return `<section class="sec"><h2>Air cargo jobs</h2><div class="card dim"><div class="row"><b>Air cargo unlocks at level ${AIR_LVL}</b><span class="lock">Level ${AIR_LVL}</span></div><p class="hint">Fly urgent freight between real US airports, Pocket Planes style. You are level ${level()}.</p></div></section>`;
+  if(air && level() < AIR_LVL) return `<section class="sec"><h2>Air cargo jobs</h2><div class="card dim"><div class="row"><b>Air cargo unlocks at level ${AIR_LVL}</b><span class="lock">Level ${AIR_LVL}</span></div><p class="hint">Fly urgent freight between real US airports. You are level ${level()}.</p></div></section>`;
   if(rail && level() < RAIL_LVL) return `<section class="sec"><h2>Train jobs</h2><div class="card dim"><div class="row"><b>Trains unlock at level ${RAIL_LVL}</b><span class="lock">Level ${RAIL_LVL}</span></div><p class="hint">Run trains between real freight yards on real track. You are level ${level()}.</p></div></section>`;
   const sj = S.jobs.find(j=>j.id===selectedJob && jobKind(j)===kind);
   const list = S.jobs.filter(j=>jobKind(j)===kind).map(j=>({j,can:jobStatus(j).can})).sort((a,b)=>(b.can-a.can)||(b.j.pay-a.j.pay));
@@ -1096,7 +1209,7 @@ function renderJobs(mode="truck"){
     h += `<p class="hint">${name} job board: ${n} of ${JOB_BOARD_MAX}. A new job posts every ${JOB_EVERY_MS>=60000?(JOB_EVERY_MS===60000?"minute":`${JOB_EVERY_MS/60000} minutes`):`${JOB_EVERY_MS/1000} seconds`}${n>=JOB_BOARD_MAX?"; when full, the oldest job you can't take is swapped for a new one":""}.</p>`; }
   { const active = activeLoads(kind);
     if(active.length) h += `<section class="sec ${cz(kp+"active")}">${secHead(kp+"active","In progress",`<span class="hint num">${active.length}</span>`)}<div class="list">${active.map(a=>activeCard(a)).join("")}</div></section>`; }
-  h += `<section class="sec ${cz(kp+"ready")}">${secHead(kp+"ready","Ready to run",`<span class="hint num">${can.length}</span>`)}${can.length?`<div class="list">${can.map(x=>jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. A new job posts every minute.</p>`}</section>`;
+  h += `<section class="sec ${cz(kp+"ready")}">${secHead(kp+"ready","Available jobs",`<span class="hint num">${can.length}</span>`)}${can.length?`<div class="list">${can.map(x=>jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. A new job posts every minute.</p>`}</section>`;
   if(cant.length) h += `<section class="sec ${cz(kp+"other")}">${secHead(kp+"other","Other jobs nearby",`<span class="hint num">${cant.length}</span>`)}<div class="list">${cant.map(x=>jobCard(x.j)).join("")}</div></section>`;
   return h;
 }
@@ -1124,7 +1237,7 @@ function renderFleet(){
         const ds = tr.drivers.map(id=>S.drivers.find(d=>d.id===id)?.name).join(" + ");
         const ns = nextStopAt(tr,t), used = usedRoom(tr);
         h += `<div class="card" id="vc-${v.id}"><div class="row"><b><span class="vic">${iconSvg(TYPE[v.type].mode,13)}</span>${esc(v.n)}</b><span class="status busy" data-ph="${tr.id}">${esc(phaseText(tr,t))}</span></div>
-          <div class="meta"><span>${esc(ds)}</span><span class="num">${roomStr(ty, used)} loaded or booked</span><span class="num">${Math.round(v.miles||0).toLocaleString("en-US")} mi lifetime</span></div>
+          <div class="meta"><span>${esc(ds)}</span><span class="num">${roomStr(ty, used)} loaded</span><span class="num">${Math.round(v.miles||0).toLocaleString("en-US")} mi lifetime</span></div>
           <div class="prog"><i data-prog="${tr.id}" style="width:${pct}%"></i></div>
           <ul class="loads">${tr.loads.filter(l=>!l.delivered).map(l=>`<li class="${l.delivered?"done":""}"><span>${esc(l.job.from.name||l.job.from.biz)} <span class="arrow">→</span> ${esc(l.job.to.name||l.job.to.biz)}</span><span class="num">${weightStr(l.job)}</span><span class="lst">${l.delivered?"Last delivered":l.picked?"On board":"Waiting for pickup"}</span><span class="num">${money(l.job.pay*(1-(l.cut||0)))}</span></li>`).join("")}</ul>
           <div class="meta"><span>${ns.label} <span class="num" data-eta="${tr.id}">${dur(ns.t-t)}</span></span><span>${used<ty.cap&&openLoads(tr).length<MAX_LOADS?"Room for more loads":"Full"}</span></div>
@@ -1194,7 +1307,7 @@ function planeCard(v, t){
     const pct = Math.min(100,(t-tr.startAt)/((tr.endAt-tr.startAt)||1)*100), ns = nextStopAt(tr,t);
     h += `<div class="prog"><i data-prog="${tr.id}" style="width:${pct}%"></i></div>
       <ul class="loads">${tr.loads.filter(l=>!l.delivered).map(l=>`<li class="${l.delivered?"done":""}"><span>${esc(l.job.from.airport)} <span class="arrow">→</span> ${esc(l.job.to.airport)} · ${esc(CARGO[l.job.cargo].n)}</span><span class="num">${weightStr(l.job)}</span><span class="lst">${l.delivered?"Last delivered":l.picked?"On board":"Waiting for pickup"}</span><span class="num">${money(l.job.pay*(1-(l.cut||0)))}</span></li>`).join("")}</ul>
-      <div class="meta"><span>${ns.label} <span class="num" data-eta="${tr.id}">${dur(ns.t-t)}</span></span><span class="num">${roomStr(ty, usedRoom(tr))} booked</span></div>
+      <div class="meta"><span>${ns.label} <span class="num" data-eta="${tr.id}">${dur(ns.t-t)}</span></span><span class="num">${roomStr(ty, usedRoom(tr))} loaded</span></div>
       <div class="btnrow"><button class="btn ghost sm" data-act="follow" data-id="${tr.id}">Follow on map</button></div>`;
   }
   const confirm = pendingConfirm===("sell"+v.id);
@@ -1254,17 +1367,31 @@ function renderShop(){
   const cityOpts = Object.keys(STATES).map(s=>`<optgroup label="${STATES[s]}">${CITIES.filter(c=>c.s===s).map(c=>`<option value="${c.i}">${esc(c.n)}</option>`).join("")}</optgroup>`).join("");
   h += `<section class="sec ${cz("hubs")}">${secHead("hubs","Hubs")}
     <div class="card ${L_<GARAGE_LVL?"dim":""}"><div class="row"><b>Open a new hub</b><span class="num">${money(GARAGE_PRICE)}</span></div>
-      <p class="hint">Opens a small hub (${HUB_TIERS[0].cap} vehicles) with jobs posted within about ${RADIUS_MI} miles. Own as many hubs as you like, even several in one city.</p>
+      <p class="hint">Opens a small hub (up to ${hubCap({tier:0})} vehicles at your level) with truck jobs posted within ${rangeMi()} miles (change this in Settings). Own as many hubs as you like, even several in one city.</p>
       <div class="btnrow"><button class="btn sm" data-act="placeHub" ${S.cash<GARAGE_PRICE?"disabled":""}>${S.cash<GARAGE_PRICE?"Not enough cash":"Pick a spot on the map"}</button></div></div>
     ${S.bases.map(b=>{const t=b.tier||0, nx=HUB_TIERS[t+1], n=S.vehicles.filter(v=>v.base===b.id).length;
       return `<div class="card"><div class="row"><b>${esc(baseName(b))}</b><span class="num">${n}/${hubCap(b)} vehicles</span></div>
       <div class="meta"><span>${esc(baseAddr(b))}</span><span>${HUB_TIERS[t].n}</span></div>
-      ${pendingConfirm===("renh"+b.id)?`<div class="btnrow"><input type="text" id="renh-${b.id}" maxlength="28" value="${esc(baseName(b))}" aria-label="New name for ${esc(baseName(b))}" style="flex:1;min-width:0;width:auto"><button class="btn sm" data-act="renHub" data-id="${b.id}">Save</button><button class="btn ghost sm" data-act="cancel">Cancel</button></div>`:`<div class="btnrow"><button class="btn ghost sm" data-act="askRenHub" data-id="${b.id}">Rename hub</button></div>`}
-      <div class="btnrow">${!nx?`<span class="lock">Largest size</span>`:nx.lvl>L_?`<span class="lock">${nx.n} (${nx.cap} vehicles) unlocks at level ${nx.lvl}</span>`:`<button class="btn ghost sm" data-act="slot" data-id="${b.id}" ${S.cash<nx.price?"disabled":""}>Upgrade to ${nx.n} (${nx.cap} vehicles) · ${money(nx.price)}</button>`}</div></div>`;}).join("")}
+      ${pendingConfirm===("renh"+b.id)?`<div class="btnrow"><input type="text" id="renh-${b.id}" maxlength="28" value="${esc(baseName(b))}" aria-label="New name for ${esc(baseName(b))}" style="flex:1;min-width:0;width:auto"><button class="btn sm" data-act="renHub" data-id="${b.id}">Save</button><button class="btn ghost sm" data-act="cancel">Cancel</button></div>`:`<div class="btnrow"><button class="btn ghost sm" data-act="askRenHub" data-id="${b.id}">Rename hub</button>${hubMoveBtn(b)}</div>`}
+      ${hubCap(b)<HUB_TIERS[t].cap&&nextSlotStep(L_)?`<p class="hint" style="margin:0">Room for ${Math.min(HUB_TIERS[t].cap,nextSlotStep(L_)[1])} vehicles at level ${nextSlotStep(L_)[0]}.</p>`:""}
+      <div class="btnrow">${!nx?`<span class="lock">Largest size</span>`:nx.lvl>L_?`<span class="lock">${nx.n} (up to ${nx.cap} vehicles) unlocks at level ${nx.lvl}</span>`:`<button class="btn ghost sm" data-act="slot" data-id="${b.id}" ${S.cash<nx.price?"disabled":""}>Upgrade to ${nx.n} (up to ${nx.cap} vehicles) · ${money(nx.price)}</button>`}</div></div>`;}).join("")}
   </section>
   <section class="sec ${cz("trains")}">${secHead("trains","Trains")}${renderTrainShop(L_)}</section>
   <section class="sec ${cz("planes")}">${secHead("planes","Planes")}${renderPlaneShop(L_)}</section>`;
   return h;
+}
+// Drop open truck jobs whose pickup is now out of range of every hub (after a range change or a hub move).
+function pruneOutOfRange(){
+  const n0 = S.jobs.length;
+  S.jobs = S.jobs.filter(j=>jobKind(j)!=="truck" || j.id===selectedJob || S.bases.some(b=>hav(basePt(b), j.from)<=rangeMi()));
+  if(S.jobs.length!==n0) S.nextJobAt = 0;
+}
+// Moving a hub: only when none of its trucks are out on a trip, since their routes end at the old address.
+const hubBusy = b => S.vehicles.some(v=>v.base===b.id && !isTrain(v) && !isPlane(v) && tripOf(v));
+const movePrice = b => MOVE_HUB_PRICE[b.tier||0];
+function hubMoveBtn(b){
+  const busy = hubBusy(b), poor = S.cash < movePrice(b);
+  return `<button class="btn ghost sm" data-act="moveHub" data-id="${b.id}" ${busy||poor?"disabled":""} title="${busy?"Wait until this hub's trucks are back":""}">${busy?"Move hub (trucks out)":poor?`Move hub · ${money(movePrice(b))} (not enough cash)`:`Move hub · ${money(movePrice(b))}`}</button>`;
 }
 function renderCrew(){
   const L_ = level();
@@ -1317,7 +1444,11 @@ function applyHeaderColor(hex){
 function setHeaderColor(hex){ try{ hex ? localStorage.setItem("freight-dispatch-header", hex) : localStorage.removeItem("freight-dispatch-header"); }catch(_){} applyHeaderColor(hex); }
 function renderSettings(){
   const cur = (headerColor() || HEADER_COLORS[0][1]).toLowerCase();
-  return `<section class="sec"><h2>Settings</h2><p class="hint">These settings are saved in this browser only.</p></section>
+  return `<section class="sec"><h2>Settings</h2><p class="hint">Settings are saved in this browser.</p></section>
+    <section class="sec"><h3>Truck job range</h3>
+      <p class="hint">How far from a hub truck pickups can be. New truck jobs post inside this ring, and a truck only takes pickups within this distance of its own hub. Deliveries can still go farther. Trains and planes keep their own ranges.</p>
+      <div class="seg" role="group" aria-label="Truck job range">${RANGE_OPTS.map(m=>`<button data-act="range" data-m="${m}" aria-pressed="${rangeMi()===m}">${m} mi</button>`).join("")}</div>
+    </section>
     <section class="sec"><h3>Header color</h3>
       <div class="swatches">${HEADER_COLORS.map(([n,c])=>`<button class="swatch" data-act="hdrColor" data-c="${c}" aria-pressed="${cur===c.toLowerCase()}"><i style="background:${c}"></i>${n}</button>`).join("")}</div>
       <label class="custom-color"><input type="color" id="hdrCustom" value="${cur}"> Pick any color</label>
@@ -1325,6 +1456,7 @@ function renderSettings(){
     </section>`;
 }
 applyHeaderColor(headerColor());
+const unlockText = L => { const st = L>1 && SLOT_STEPS.find(([l])=>l===L); return [UNLOCKS[L], st && `Hubs hold up to ${st[1]} vehicles`].filter(Boolean).join(", "); };
 function renderCompany(){
   const L_ = level(), reset = pendingConfirm==="reset";
   return `<section class="sec"><h2>${esc(S.company)}</h2></section>${levelBar()}<section class="sec">
@@ -1332,7 +1464,7 @@ function renderCompany(){
       <tr><td>Level</td><td>${L_}</td></tr>
       <tr><td>Total XP</td><td>${Math.floor(S.xp).toLocaleString("en-US")}</td></tr>
       <tr><td>XP to level ${L_+1}</td><td>${Math.ceil(xpNeed(L_+1)-S.xp).toLocaleString("en-US")}</td></tr>
-      <tr><td>Next unlock</td><td style="font-family:var(--body)">${esc(Object.entries(UNLOCKS).find(([k])=>+k>L_)?.[1]||"All unlocked")}</td></tr>
+      <tr><td>Next unlock</td><td style="font-family:var(--body)">${esc(unlockText([...Array(50)].map((_,i)=>i+1).find(L=>L>L_&&unlockText(L)))||"All unlocked")}</td></tr>
       <tr><td>Deliveries</td><td>${S.jobsDone.toLocaleString("en-US")}</td></tr>
       <tr><td>Earned after driver pay</td><td>${money(S.earned)}</td></tr>
       <tr><td>Hubs</td><td>${S.bases.length}</td></tr>
@@ -1340,7 +1472,7 @@ function renderCompany(){
     </tbody></table></section>
     <section class="sec"><h3>XP needed for each level</h3>
       <div style="overflow-x:auto"><table class="spec lvtab"><thead><tr><td>Level</td><td>XP for this level</td><td>Total XP</td><td>Unlocks</td></tr></thead><tbody>
-      ${[...Array(29)].map((_,i)=>i+2).concat([35,40,45,50]).map(L=>`<tr class="${L===L_+1?"next":""} ${L<=L_?"done":""}"><td>${L}</td><td>${(xpNeed(L)-xpNeed(L-1)).toLocaleString("en-US")}</td><td>${xpNeed(L).toLocaleString("en-US")}</td><td>${esc(UNLOCKS[L]||"")}</td></tr>`).join("")}
+      ${[...Array(29)].map((_,i)=>i+2).concat([35,40,45,50]).map(L=>`<tr class="${L===L_+1?"next":""} ${L<=L_?"done":""}"><td>${L}</td><td>${(xpNeed(L)-xpNeed(L-1)).toLocaleString("en-US")}</td><td>${xpNeed(L).toLocaleString("en-US")}</td><td>${esc(unlockText(L))}</td></tr>`).join("")}
       </tbody></table></div></section>
     <section class="sec"><h3>Goals</h3><ul class="goals">${goals().map(x=>`<li class="${x[1]?"done":""}">${esc(x[0])}</li>`).join("")}</ul></section>
     <section class="sec"><h3>Clock speed</h3><p class="hint">Speeds up every trip. Handy for testing the economy; away time always counts at normal speed.</p>
@@ -1419,6 +1551,7 @@ $("#panelBody").addEventListener("click", e=>{
     toast(`Hired ${esc(name)}`); save(); refresh(); return;
   }
   if(a==="hazmat"){ const d=S.drivers.find(x=>x.id===id); if(d&&S.cash>=HAZMAT_PRICE){S.cash-=HAZMAT_PRICE;d.hazmat=true;save();refresh();} return; }
+  if(a==="moveHub"){ const b=baseById(id); if(b && !hubBusy(b) && S.cash>=movePrice(b)){ startPlacement({first:false, move:b.id}); const p=basePt(b); map.flyTo([p.lat,p.lon], 10, {duration:.6}); } return; }
   if(a==="placeHub"){ if(S.cash>=GARAGE_PRICE) startPlacement({first:false}); return; }
   if(a==="askRenHub"){ pendingConfirm="renh"+id; renderPanel(); const inp=$("#renh-"+id); if(inp){ inp.focus(); inp.select(); } return; }
   if(a==="renHub"){ const b=baseById(id), inp=$("#renh-"+id); const n=(inp?.value||"").trim().slice(0,28); if(b&&n&&n!==baseName(b)){ logEvent(`Renamed hub <b>${esc(baseName(b))}</b> to <b>${esc(n)}</b>`); b.name=n; save(); drawBases(); } pendingConfirm=null; refresh(); return; }
@@ -1454,6 +1587,7 @@ $("#panelBody").addEventListener("click", e=>{
   if(a==="setLvl"){ if(!S.test) return; const L_ = +$("#testLvl").value; S.xp = xpNeed(L_); logEvent(`Test mode: set to level ${L_}`); drawYards(); save(); refresh(); return; }
   if(a==="addCash"){ if(!S.test) return; const n = +el.dataset.n; S.cash += n; logEvent(`Test mode: added ${money(n)}`); save(); refresh(); return; }
   if(a==="toggleSec"){ const k = el.dataset.k; collapsed.has(k) ? collapsed.delete(k) : collapsed.add(k); try{ localStorage.setItem("freight-dispatch-collapsed", JSON.stringify([...collapsed])); }catch(_){} renderPanel(); return; }
+  if(a==="range"){ const m=+el.dataset.m; if(RANGE_OPTS.includes(m)){ S.range=m; pruneOutOfRange(); drawBases(); drawJobs(); save(); refresh(); toast(`Truck jobs now post within ${m} mi of your hubs`); } return; }
   if(a==="hdrColor"){ setHeaderColor(el.dataset.c); renderPanel(); return; }
   if(a==="askSell"){ pendingConfirm="sell"+id; renderPanel(); return; }
   if(a==="sell"){ const v=S.vehicles.find(x=>x.id===id); if(v&&!tripOf(v)){S.cash+=vehValue(v)*0.6; S.vehicles=S.vehicles.filter(x=>x!==v);} pendingConfirm=null; save(); refresh(); return; }
@@ -1527,20 +1661,22 @@ function renderPlaceBar(){
   const p = placing, bar = $("#placeBar"); if(!p){ bar.hidden = true; return; }
   const stName = p.first ? STATES[p.state] : null;
   const keepName = $("#hubName")?.value;
-  const defName = keepName || (p.first ? "HQ" : `Hub ${S ? S.bases.length+1 : 2}`);
+  const mvB = p.move && baseById(p.move);
+  const defName = keepName || (mvB ? baseName(mvB) : p.first ? "HQ" : `Hub ${S ? S.bases.length+1 : 2}`);
   let body;
-  if(!p.pt) body = `<p class="hint" style="color:var(--ink)">Click anywhere on the map${stName?` in ${esc(stName)}`:""} to place your ${p.first?"first ":""}hub. Zoom in to pick a street.</p>`;
+  if(!p.pt) body = `<p class="hint" style="color:var(--ink)">Click anywhere on the map${stName?` in ${esc(stName)}`:""} to ${mvB?`move ${esc(baseName(mvB))}`:`place your ${p.first?"first ":""}hub`}. Zoom in to pick a street.${mvB?` Moving costs ${money(movePrice(mvB))}. Its vehicles and crew come along.`:""}</p>`;
   else if(p.looking) body = `<p class="addr">Looking up the address…</p>`;
   else {
     const wrongState = p.first && p.info.state && p.info.state !== p.state;
     const notUS = !p.info.us || !p.info.state;
-    const cost = p.first ? "Free" : money(GARAGE_PRICE);
+    const mv = p.move && baseById(p.move);
+    const cost = p.first ? "Free" : mv ? money(movePrice(mv)) : money(GARAGE_PRICE);
     body = `<p class="addr"><b>${esc(p.info.line)}</b></p>
       ${notUS?`<p class="need" style="margin:0">Pick a spot in the lower 48 states.</p>`:wrongState?`<p class="need" style="margin:0">That spot is in ${esc(STATES[p.info.state]||p.info.state)}. Pick a spot in ${esc(stName)}, or start over to change your home state.</p>`:""}
       <label class="fld">Hub name<input type="text" id="hubName" maxlength="28" value="${esc(defName)}"></label>
-      <div class="btnrow"><button class="btn" id="placeGo" ${wrongState||notUS?"disabled":""}>Build hub here · ${cost}</button><span class="hint">or click the map to move it</span></div>`;
+      <div class="btnrow"><button class="btn" id="placeGo" ${wrongState||notUS?"disabled":""}>${mvB?"Move hub here":"Build hub here"} · ${cost}</button><span class="hint">or click the map to move it</span></div>`;
   }
-  bar.innerHTML = `<h2>${p.first?"Place your first hub":"Place a new hub"}</h2>${body}${p.first?"":`<div class="btnrow"><button class="btn ghost sm" id="placeCancel">Cancel</button></div>`}`;
+  bar.innerHTML = `<h2>${p.first?"Place your first hub":mvB?`Move ${esc(baseName(mvB))}`:"Place a new hub"}</h2>${body}${p.first?"":`<div class="btnrow"><button class="btn ghost sm" id="placeCancel">Cancel</button></div>`}`;
   bar.hidden = false;
   $("#placeGo") && ($("#placeGo").onclick = buildHub);
   $("#placeCancel") && ($("#placeCancel").onclick = endPlacement);
@@ -1556,6 +1692,15 @@ function buildHub(){
     map.flyTo([p.pt.lat,p.pt.lon], 11, {duration:1});
     toast(`${esc(name)} is open at ${esc(p.info.line)}. ${esc(S.drivers[0].name)} is waiting with your van.`, 6000);
     save(); return;
+  }
+  if(p.move){
+    const b = baseById(p.move), price = b && movePrice(b);
+    if(!b){ endPlacement(); return; }
+    if(hubBusy(b)){ toast("Wait until this hub's trucks are back before moving it."); return; }
+    if(S.cash < price){ toast("Not enough cash to move this hub."); return; }
+    S.cash -= price; b.pt = p.pt; b.addr = p.info.line; b.city = city; b.name = name; endPlacement();
+    logEvent(`Moved <b>${esc(name)}</b> to ${esc(p.info.line)} for ${money(price)}`);
+    toast(`Moved <b>${esc(name)}</b> to ${esc(p.info.line)}`); pruneOutOfRange(); drawBases(); drawJobs(); save(); refresh(); return;
   }
   if(S.cash < GARAGE_PRICE){ toast("Not enough cash for a new hub."); return; }
   S.cash -= GARAGE_PRICE;

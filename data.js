@@ -81,7 +81,7 @@ const LAST = ["Brooks","Ortiz","Hale","Washington","Price","Nguyen","Carter","Re
 const DRV_LEVELS = [0,5,15,30,50];
 const GARAGE_PRICE = 40000, GARAGE_LVL = 1, SLOT_PRICE = 15000, DISPATCH_PRICE = 15000, DISPATCH_LVL = 8, HAZMAT_PRICE = 10000;
 const RADIUS_MI = 150, MAX_DEADHEAD = 300, BOARD_PER_BASE = 10, MIN = 60000;
-const UNLOCKS = {2:"Box truck",5:"Reefer box truck",6:"CDL drivers and straight truck",8:"Dispatchers",10:"Semi + dry van",12:"Semi + reefer",14:"Semi + flatbed",15:"Trains, rail yards and engineers",18:"Tankers and hazmat training",20:"Road freight locomotive, car haulers, air cargo (next build)",25:"Team-driven semi"};
+const UNLOCKS = {2:"Box truck",5:"Reefer box truck",6:"CDL drivers and straight truck",8:"Dispatchers",10:"Semi + dry van",12:"Semi + reefer",14:"Semi + flatbed",15:"Trains, rail yards and engineers",18:"Tankers and hazmat training",20:"Road freight locomotive, car haulers",25:"Team-driven semi"};
 
 
 /* Hub sizes: every garage starts Small and can be upgraded. */
@@ -90,6 +90,12 @@ const HUB_TIERS = [
   {n:"Medium hub", cap:40, price:75000,  lvl:4},
   {n:"Large hub",  cap:60, price:200000, lvl:10}
 ];
+/* Vehicle slots open up as you level. A hub holds the smaller of its size and your level's slots. */
+const SLOT_STEPS = [[1,5],[3,10],[6,15],[9,20],[12,25],[15,30],[18,35],[21,40],[25,50],[30,60]];
+const levelSlots = L => SLOT_STEPS.filter(([l])=>l<=L).pop()[1];
+const nextSlotStep = L => SLOT_STEPS.find(([l])=>l>L);
+const MOVE_HUB_PRICE = [10000, 20000, 35000];   // moving a small, medium or large hub
+const RANGE_OPTS = [50, 100, 200, 300], DEFAULT_RANGE = 200;   // how far from a hub truck pickups can be
 const JOB_BOARD_MAX = 25;     // most jobs a board (truck, train or air) holds at once
 const JOB_EVERY_MS = 60000;   // a new job posts every minute on each board while it has room
 
@@ -199,7 +205,7 @@ const RAIL_YARDS = [
 ].map(([id,n,city,s,lat,lon])=>({id,n,city,s,lat,lon}));
 const YARD = Object.fromEntries(RAIL_YARDS.map(y=>[y.id,y]));
 const RAIL_LVL = 15;
-const RAIL_PAY = 0.5;            // rail pays less per pound-mile, but trains carry a lot
+const RAIL_PAY = 0.15;           // rail pays far less per pound-mile (real rail is about a third of trucking or less), but trains carry a lot
 const CONTAINER_LB = 40000;
 const MAX_RAIL_DEADHEAD = 600;   // a train can run empty this far to reach a pickup yard
 const ENGINEER = {n:"Engineer", fee:20000, lvl:RAIL_LVL};
@@ -301,15 +307,15 @@ const AIRPORTS = [
   ["PVD","Rhode Island T. F. Green International","Providence","RI",41.7240,-71.4282,1]
 ].map(([id,n,city,s,lat,lon,size])=>({id,n,city,s,lat,lon,size}));
 const AIRPORT = Object.fromEntries(AIRPORTS.map(a=>[a.id,a]));
-const AIR_LVL = 20;
+const AIR_LVL = 25;
 const AIR_PAY = 3;               // air pays more per pound-mile than trucks
 const MAX_AIR_DEADHEAD = 1200;   // a plane can fly empty this far to reach a pickup airport
 const PILOT = {n:"Pilot", fee:25000, lvl:AIR_LVL};
 const AIRPORT_SIZE = {1:"Regional", 2:"Mid-size", 3:"Major cargo hub"};
 const PLANES = [
-  {id:"prop",      n:"Courier prop plane",     price:450000,   cap:3000,   leg:900,  lvl:20, minSize:1, lic:"pilot"},
-  {id:"turboprop", n:"Turboprop freighter",    price:1500000,  cap:12000,  leg:1200, lvl:24, minSize:1, lic:"pilot"},
-  {id:"rjet",      n:"Regional jet freighter", price:6000000,  cap:25000,  leg:1800, lvl:30, minSize:2, lic:"pilot2"},
+  {id:"prop",      n:"Courier prop plane",     price:450000,   cap:3000,   leg:900,  lvl:25, minSize:1, lic:"pilot"},
+  {id:"turboprop", n:"Turboprop freighter",    price:1500000,  cap:12000,  leg:1200, lvl:28, minSize:1, lic:"pilot"},
+  {id:"rjet",      n:"Regional jet freighter", price:6000000,  cap:25000,  leg:1800, lvl:32, minSize:2, lic:"pilot2"},
   {id:"narrow",    n:"Narrowbody freighter",   price:18000000, cap:50000,  leg:3000, lvl:38, minSize:2, lic:"pilot2"},
   {id:"wide",      n:"Widebody freighter",     price:60000000, cap:220000, leg:4500, lvl:50, minSize:3, lic:"pilot2"}
 ];
@@ -317,4 +323,4 @@ PLANES.forEach(p=>{ p.mode = "plane"; TYPE[p.id] = p; });
 DRIVER_KIND.pilot = {n:"Pilot", cut:0, fee:PILOT.fee, lvl:AIR_LVL};
 Object.assign(CARGO, {express:{n:"Express documents",mult:1.3}, electronics:{n:"Electronics",mult:1.5}, medical:{n:"Medical supplies",mult:1.6}, perishables:{n:"Perishables",mult:1.4}});
 const AIR_CARGO = ["parcels","express","electronics","medical","perishables"];
-Object.assign(UNLOCKS, {20:"Air cargo (prop planes and pilots), road freight locomotive, car haulers", 24:"Turboprop freighter", 30:"Regional jet freighter, heavy-haul locomotive", 38:"Narrowbody freighter", 50:"Widebody freighter"});
+Object.assign(UNLOCKS, {25:"Air cargo (prop planes and pilots), team-driven semi", 28:"Turboprop freighter", 30:"Heavy-haul locomotive", 32:"Regional jet freighter", 38:"Narrowbody freighter", 50:"Widebody freighter"});
