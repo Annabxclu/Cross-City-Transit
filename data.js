@@ -90,6 +90,7 @@ const HUB_TIERS = [
   {n:"Medium hub", cap:40, price:75000,  lvl:4},
   {n:"Large hub",  cap:60, price:200000, lvl:10}
 ];
+const JOB_BOARD_MAX = 25;     // most jobs a board (truck, train or air) holds at once
 const JOB_EVERY_MS = 30000;   // a new job posts every 30 seconds while the board has room
 
 /* Made-up business names: a place word + a suffix that fits the business type. */

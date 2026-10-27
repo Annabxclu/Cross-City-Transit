@@ -109,12 +109,12 @@ const level = () => levelOf(S.xp);
 const baseById = id => S.bases.find(b=>b.id===id);
 const hubCap = b => HUB_TIERS[b.tier||0].cap;
 // Each kind of vehicle has its own job board: one more job than you have of that kind.
-const maxJobs = () => trucks().length + 1;
+const maxJobs = () => JOB_BOARD_MAX;
 const jobKind = j => j.air ? "air" : j.rail ? "rail" : "truck";
 const boardCount = () => S.jobs.filter(j=>jobKind(j)==="truck").length;
-const maxAirJobs = () => S.vehicles.filter(isPlane).length + 1;
+const maxAirJobs = () => JOB_BOARD_MAX;
 const airCount = () => S.jobs.filter(j=>j.air).length;
-const maxRailJobs = () => S.vehicles.filter(isTrain).length + 1;
+const maxRailJobs = () => JOB_BOARD_MAX;
 const railCount = () => S.jobs.filter(j=>j.rail).length;
 /* ---------------- Rail helpers ---------------- */
 const isTrain = v => TYPE[v.type]?.mode==="train";
@@ -538,22 +538,24 @@ function logic(){
   S.jobs = S.jobs.filter(j=>!j.expires || j.expires>S.clock);
   if(selectedJob && !S.jobs.find(j=>j.id===selectedJob)) selectedJob = null;
   if(S.jobs.length!==n0) changed = true;
-  // Mission Chief style: one new job every 30 seconds, up to one more than your vehicle count.
-  // An empty board refills right away so there is always something to do.
-  // Train jobs: their own board, one more than your number of trains, a new one every 30 seconds.
-  if(level()>=RAIL_LVL && railCount() < maxRailJobs() && S.clock >= (S.nextRailAt||0)){
-    const rj = spawnRailJob(pick(S.bases)); S.nextRailAt = S.clock + (railCount()<=1 ? 5000 : JOB_EVERY_MS);
-    if(rj){ changed = true; if(!simulating && !awayLog) toast(`New rail job: <b>${esc(rj.from.name)}</b> to ${esc(rj.to.name)} · <span class="num">${money(rj.pay)}</span>`, 3500); }
-  }
-  // Air cargo jobs: their own board, one more than your number of planes.
-  if(level()>=AIR_LVL && airCount() < maxAirJobs() && S.clock >= (S.nextAirAt||0)){
-    const aj = spawnAirJob(pick(S.bases)); S.nextAirAt = S.clock + (airCount()<=1 ? 5000 : JOB_EVERY_MS);
-    if(aj){ changed = true; if(!simulating && !awayLog) toast(`New air cargo job: <b>${esc(aj.from.airport)}</b> to <b>${esc(aj.to.airport)}</b> · <span class="num">${money(aj.pay)}</span>`, 3500); }
-  }
-  // Truck jobs: one more than your number of trucks.
-  if(boardCount() < maxJobs() && (boardCount()===0 || S.clock >= (S.nextJobAt||0))){
-    const j = spawnJob(pick(S.bases)); S.nextJobAt = S.clock + JOB_EVERY_MS; changed = true;
-    if(j && !simulating && !awayLog) toast(`New ${j.event?esc(j.item.toLowerCase())+" ":""}job: <b>${esc(j.from.name)}</b> in ${esc(cityName(j.from.c))} · <span class="num">${money(j.pay)}</span>`, 3000);
+  // Mission Chief style: a new job every 30 seconds on each board, however many vehicles you own.
+  // Each board holds up to JOB_BOARD_MAX jobs. When a board is full, the oldest job your fleet can't
+  // take is swapped for a new one, so the board stays fresh. Jobs you can run are never removed.
+  for(const [kind, lvl, timer, spawn] of [["rail", RAIL_LVL, "nextRailAt", spawnRailJob], ["air", AIR_LVL, "nextAirAt", spawnAirJob], ["truck", 1, "nextJobAt", spawnJob]]){
+    if(level() < lvl) continue;
+    const mine = S.jobs.filter(j=>jobKind(j)===kind);
+    if(mine.length && S.clock < (S[timer]||0)) continue;
+    if(mine.length >= JOB_BOARD_MAX){
+      const stale = mine.filter(j=>j.id!==selectedJob && !jobStatus(j).can).sort((x,y)=>(x.posted||0)-(y.posted||0))[0];
+      if(!stale){ S[timer] = S.clock + JOB_EVERY_MS; continue; }
+      S.jobs = S.jobs.filter(j=>j!==stale);
+    }
+    const nj = spawn(pick(S.bases)); S[timer] = S.clock + (mine.length<=1 && kind!=="truck" ? 5000 : JOB_EVERY_MS); changed = true;
+    if(nj && !simulating && !awayLog){
+      if(kind==="rail") toast(`New rail job: <b>${esc(nj.from.name)}</b> to ${esc(nj.to.name)} · <span class="num">${money(nj.pay)}</span>`, 3500);
+      else if(kind==="air") toast(`New air cargo job: <b>${esc(nj.from.airport)}</b> to <b>${esc(nj.to.airport)}</b> · <span class="num">${money(nj.pay)}</span>`, 3500);
+      else toast(`New ${nj.event?esc(nj.item.toLowerCase())+" ":""}job: <b>${esc(nj.from.name)}</b> in ${esc(cityName(nj.from.c))} · <span class="num">${money(nj.pay)}</span>`, 3000);
+    }
   }
   for(const b of S.bases){
     if(!b.dispatcher) continue;
@@ -1090,7 +1092,8 @@ function renderJobs(mode="truck"){
     h += `<p class="hint">Air cargo flies between real US airports (round markers on the map). Bigger aircraft need bigger airports.</p>`;
   }
   if(kind==="truck" && S.jobsDone<1 && !sj) h += `<p class="hint" style="color:var(--ink)">Tap an orange pin on the map, or pick a job below, then send your van. Gray pins need a vehicle you do not own yet.</p>`;
-  h += air ? `<p class="hint">Air cargo job board: ${airCount()} of ${maxAirJobs()} (one more than your ${S.vehicles.filter(isPlane).length} plane${S.vehicles.filter(isPlane).length===1?"":"s"}). A new one posts every ${JOB_EVERY_MS/1000} seconds.</p>` : rail ? `<p class="hint">Train job board: ${railCount()} of ${maxRailJobs()} (one more than your ${S.vehicles.filter(isTrain).length} train${S.vehicles.filter(isTrain).length===1?"":"s"}). A new one posts every ${JOB_EVERY_MS/1000} seconds.</p>` : `<p class="hint">Truck job board: ${boardCount()} of ${maxJobs()} (one more than your ${trucks().length} truck${trucks().length===1?"":"s"}). A new one posts every ${JOB_EVERY_MS/1000} seconds.</p>`;
+  { const n = air ? airCount() : rail ? railCount() : boardCount(), name = air ? "Air cargo" : rail ? "Train" : "Truck";
+    h += `<p class="hint">${name} job board: ${n} of ${JOB_BOARD_MAX}. A new job posts every ${JOB_EVERY_MS/1000} seconds${n>=JOB_BOARD_MAX?"; when full, the oldest job you can't take is swapped for a new one":""}.</p>`; }
   { const active = activeLoads(kind);
     if(active.length) h += `<section class="sec ${cz(kp+"active")}">${secHead(kp+"active","In progress",`<span class="hint num">${active.length}</span>`)}<div class="list">${active.map(a=>activeCard(a)).join("")}</div></section>`; }
   h += `<section class="sec ${cz(kp+"ready")}">${secHead(kp+"ready","Ready to run",`<span class="hint num">${can.length}</span>`)}${can.length?`<div class="list">${can.map(x=>jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. A new job posts every 30 seconds.</p>`}</section>`;
