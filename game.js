@@ -538,7 +538,7 @@ function logic(){
   S.jobs = S.jobs.filter(j=>!j.expires || j.expires>S.clock);
   if(selectedJob && !S.jobs.find(j=>j.id===selectedJob)) selectedJob = null;
   if(S.jobs.length!==n0) changed = true;
-  // Mission Chief style: a new job every 30 seconds on each board, however many vehicles you own.
+  // Mission Chief style: a new job every minute on each board, however many vehicles you own.
   // Each board holds up to JOB_BOARD_MAX jobs. When a board is full, the oldest job your fleet can't
   // take is swapped for a new one, so the board stays fresh. Jobs you can run are never removed.
   for(const [kind, lvl, timer, spawn] of [["rail", RAIL_LVL, "nextRailAt", spawnRailJob], ["air", AIR_LVL, "nextAirAt", spawnAirJob], ["truck", 1, "nextJobAt", spawnJob]]){
@@ -1093,10 +1093,10 @@ function renderJobs(mode="truck"){
   }
   if(kind==="truck" && S.jobsDone<1 && !sj) h += `<p class="hint" style="color:var(--ink)">Tap an orange pin on the map, or pick a job below, then send your van. Gray pins need a vehicle you do not own yet.</p>`;
   { const n = air ? airCount() : rail ? railCount() : boardCount(), name = air ? "Air cargo" : rail ? "Train" : "Truck";
-    h += `<p class="hint">${name} job board: ${n} of ${JOB_BOARD_MAX}. A new job posts every ${JOB_EVERY_MS/1000} seconds${n>=JOB_BOARD_MAX?"; when full, the oldest job you can't take is swapped for a new one":""}.</p>`; }
+    h += `<p class="hint">${name} job board: ${n} of ${JOB_BOARD_MAX}. A new job posts every ${JOB_EVERY_MS>=60000?(JOB_EVERY_MS===60000?"minute":`${JOB_EVERY_MS/60000} minutes`):`${JOB_EVERY_MS/1000} seconds`}${n>=JOB_BOARD_MAX?"; when full, the oldest job you can't take is swapped for a new one":""}.</p>`; }
   { const active = activeLoads(kind);
     if(active.length) h += `<section class="sec ${cz(kp+"active")}">${secHead(kp+"active","In progress",`<span class="hint num">${active.length}</span>`)}<div class="list">${active.map(a=>activeCard(a)).join("")}</div></section>`; }
-  h += `<section class="sec ${cz(kp+"ready")}">${secHead(kp+"ready","Ready to run",`<span class="hint num">${can.length}</span>`)}${can.length?`<div class="list">${can.map(x=>jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. A new job posts every 30 seconds.</p>`}</section>`;
+  h += `<section class="sec ${cz(kp+"ready")}">${secHead(kp+"ready","Ready to run",`<span class="hint num">${can.length}</span>`)}${can.length?`<div class="list">${can.map(x=>jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. A new job posts every minute.</p>`}</section>`;
   if(cant.length) h += `<section class="sec ${cz(kp+"other")}">${secHead(kp+"other","Other jobs nearby",`<span class="hint num">${cant.length}</span>`)}<div class="list">${cant.map(x=>jobCard(x.j)).join("")}</div></section>`;
   return h;
 }
