@@ -445,7 +445,10 @@ function jobStatus(j){
   const ok = opts.filter(o=>o.r.ok).sort((a,b)=>a.r.plan.deliverIn-b.r.plan.deliverIn);
   if(ok.length) return {can:true, opts:ok};
   const capable = opts.filter(o=>o.r.busy||o.r.nodriver);
-  if(capable.length) return {can:false, soon:true, why: capable.some(o=>o.r.busy) ? "Your matching vehicles are busy" : capable[0].r.why};
+  // Say why idle vehicles of the right kind can't take it (no driver, out of range, wrong trailer…).
+  const mode = j.air ? "plane" : j.rail ? "train" : "truck";
+  const idle = opts.filter(o=>!tripOf(o.v) && (TYPE[o.v.type].mode||"truck")===mode).slice(0, 3).map(o=>`${o.v.n}: ${o.r.why}`);
+  if(capable.length) return {can:false, soon:true, why: (capable.some(o=>o.r.busy) ? "Your matching vehicles are busy" : capable[0].r.why) + (idle.length && capable.some(o=>o.r.busy) ? ". Idle: " + idle.join("; ") : "")};
   if(j.air){ const p = PLANES.find(p=>p.leg>=j.miles && p.cap>=j.weight && AIRPORT[j.from.airport].size>=p.minSize && AIRPORT[j.to.airport].size>=p.minSize);
     return {can:false, why: p ? `Needs a ${p.n.toLowerCase()} or bigger${p.lvl>level()?` · level ${p.lvl}`:""}` : "No aircraft can fly this"}; }
   if(j.rail){ const lo = LOCOS.filter(l=>l.leg>=j.miles)[0], carN = RAILCARS[j.carType].n.toLowerCase();
