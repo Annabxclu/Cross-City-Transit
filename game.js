@@ -103,7 +103,7 @@ const straight = (a,b) => [[a.lat,a.lon],[b.lat,b.lon]];
 
 /* ---------------- State ---------------- */
 let S = null;
-let selectedJob = null, tab = "jobs", pendingConfirm = null, chosenVeh = null;
+let selectedJob = null, tab = "jobs", pendingConfirm = null, chosenVeh = null, extraSel = new Set();
 const nid = p => p + (++S.idc);
 const level = () => levelOf(S.xp);
 const baseById = id => S.bases.find(b=>b.id===id);
@@ -1105,7 +1105,7 @@ function markTabs(){
 }
 function setTab(t){ tab=t; pendingConfirm=null; renderPanel(); markTabs(); }
 function selectJob(id, fly){
-  selectedJob=id; chosenVeh=null;
+  selectedJob=id; chosenVeh=null; extraSel = new Set();
   const j = S.jobs.find(x=>x.id===id);
   tab = !j ? "jobs" : j.air ? "air" : j.rail ? "rail" : "jobs"; markTabs(); if(j){ routeJob(j); if(fly) fitJob(j); }
   drawJobs(); renderPanel(); $("#panelBody").scrollTop=0;
@@ -1134,6 +1134,24 @@ function payBreakdown(j){
   const um = j.urg==="express"?1.8:j.urg==="priority"?1.3:1;
   return `<p class="hint" style="margin:0">Pay: ${money(150*PAY_SCALE)} base + ${money(dist*PAY_SCALE)} for ${j.miles} mi × ${weightStr(j)} × ${CARGO[j.cargo].mult} ${esc(CARGO[j.cargo].n.toLowerCase())}${um>1?` × ${um} ${j.urg}`:""}${j.event?` × ${EVENT_PAY_BONUS} event bonus`:""}${j.rail?` × ${RAIL_PAY} rail rate`:""}${j.air?` × ${AIR_PAY} air rate`:""}</p>`;
 }
+// Other open jobs the chosen vehicle could carry on the same trip, nearest pickup first.
+// Ticked jobs are dispatched together with the main one; room left updates as you tick.
+function extraLoadsList(j, v){
+  if(isTrain(v)) return "";
+  const t = TYPE[v.type], tr = tripOf(v);
+  const cands = S.jobs.filter(x=>x.id!==j.id && jobKind(x)===jobKind(j) && vehicleFor(v,x).ok)
+    .sort((a,b)=>hav(j.from,a.from)-hav(j.from,b.from)).slice(0, 12);
+  for(const id of [...extraSel]) if(!cands.find(x=>x.id===id)) extraSel.delete(id);
+  if(!cands.length) return "";
+  const picked = cands.filter(x=>extraSel.has(x.id));
+  const used = usedRoom(tr) + j.weight + picked.reduce((n,x)=>n+x.weight, 0);
+  const loads = openLoads(tr).length + 1 + picked.length;
+  return `<div class="extras"><div class="row"><b>Add more loads to this trip</b><span class="hint num">${roomStr(t, used)}</span></div>
+    ${cands.map(x=>{ const on = extraSel.has(x.id), fits = on || (used + x.weight <= t.cap && loads < MAX_LOADS);
+      return `<label class="opt ${fits?"":"dim"}"><input type="checkbox" name="extra" value="${x.id}" ${on?"checked":""} ${fits?"":"disabled"}>
+        <span><b>${esc(x.from.name||x.from.biz)}</b> → ${esc(x.to.name||x.to.biz)}<small>${weightStr(x)} · ${x.miles} mi · pickup ${Math.round(hav(j.from,x.from))} mi from this one${fits?"":" · no room"}</small></span>
+        <span class="pay">${money(x.pay)}</span></label>`; }).join("")}</div>`;
+}
 function dispatchCard(j){
   const st = jobStatus(j), local = j.from.c===j.to.c;
   let opts;
@@ -1149,7 +1167,8 @@ function dispatchCard(j){
         ${others.map(v=>`<option disabled>${esc(v.n)} · ${esc(vehicleFor(v,j).why||"Not available")}</option>`).join("")}
       </select>
       ${sel ? (o=>{ const p=o.r.plan; return `<div class="opt chosen"><span><b>${esc(o.v.n)}</b> · ${esc(TYPE[o.v.type].n)}<small>${esc(o.r.drivers.map(d=>d.name).join(" + "))} · ${p.adding?`<b>Adds to its current trip</b> (${p.loads} loads, ${capText(o.v, j)}) · `:""}${p.dead>1?`${p.dead} mi to ${isTrain(o.v)?"the pickup yard":isPlane(o.v)?"the pickup airport":"pickup"} · `:""}${p.adding?"":`loading ${dur(p.ld)} · ${isPlane(o.v)?"flight":"drive"} ${dur(p.tHaul)} · unloading ${dur(p.lu)}<br>`}Delivers this load in ${dur(p.deliverIn)}, back at ${isTrain(o.v)?"its yard":isPlane(o.v)?"its home airport":"the hub"} in ${dur(p.total)}${p.adding&&p.extra>0?` (+${dur(p.extra)})`:""}</small></span><span class="pay" title="Job pay">${money(Math.round(j.pay*p.bonus*(1-p.cut)))}</span></div>`; })(sel) : `<p class="hint" style="margin:0">Pick a vehicle to see its timing, then dispatch.</p>`}
-      <div class="btnrow"><button class="btn" data-act="go" data-id="${j.id}" ${j.routing||!sel?"disabled":""}>${j.routing?"Finding route…":"Dispatch"}</button><button class="btn ghost" data-act="unsel">Close</button></div>`;
+      ${sel ? extraLoadsList(j, sel.v) : ""}
+      <div class="btnrow"><button class="btn" data-act="go" data-id="${j.id}" ${j.routing||!sel?"disabled":""}>${j.routing?"Finding route…":extraSel.size?`Dispatch ${extraSel.size+1} loads · ${money(j.pay+[...extraSel].reduce((n,id)=>n+(S.jobs.find(x=>x.id===id)?.pay||0),0))}`:"Dispatch"}</button><button class="btn ghost" data-act="unsel">Close</button></div>`;
   } else {
     opts = `<p class="need" style="font-size:13px;margin:0">${esc(st.why)}</p><div class="btnrow"><button class="btn ghost" data-act="unsel">Close</button>${st.soon?"":`<button class="btn ghost" data-act="tab" data-tab="shop">Open shop</button>`}</div>`;
   }
@@ -1466,7 +1485,7 @@ function renderCompany(){
       <tr><td>XP to level ${L_+1}</td><td>${Math.ceil(xpNeed(L_+1)-S.xp).toLocaleString("en-US")}</td></tr>
       <tr><td>Next unlock</td><td style="font-family:var(--body)">${esc(unlockText([...Array(50)].map((_,i)=>i+1).find(L=>L>L_&&unlockText(L)))||"All unlocked")}</td></tr>
       <tr><td>Deliveries</td><td>${S.jobsDone.toLocaleString("en-US")}</td></tr>
-      <tr><td>Earned after driver pay</td><td>${money(S.earned)}</td></tr>
+      <tr><td>Earned</td><td>${money(S.earned)}</td></tr>
       <tr><td>Hubs</td><td>${S.bases.length}</td></tr>
       <tr><td>Home state</td><td style="font-family:var(--body)">${STATES[S.homeState]}</td></tr>
     </tbody></table></section>
@@ -1531,7 +1550,13 @@ $("#panelBody").addEventListener("click", e=>{
   if(a==="follow"){ following = id; const tr=S.trips.find(x=>x.id===id); if(tr) map.flyTo(posOf(tr,displayClock()).ll, Math.max(map.getZoom(),13), {duration:.6}); return; }
   if(a==="go"){
     const j = S.jobs.find(x=>x.id===id), v = S.vehicles.find(x=>x.id===chosenVeh);
-    if(j && v && dispatch(j,v)){ toast(`<b>${esc(v.n)}</b> dispatched to ${esc(j.from.name||j.from.biz)}, ${esc(cityName(j.from.c))}`); selectedJob=null; save(); drawJobs(); renderPanel(); }
+    if(j && v && dispatch(j,v)){
+      let n = 1;
+      for(const id of extraSel){ const x = S.jobs.find(y=>y.id===id); if(x && dispatch(x, v)) n++; }
+      extraSel = new Set();
+      toast(n>1 ? `<b>${esc(v.n)}</b> dispatched with ${n} loads, first stop ${esc(j.from.name||j.from.biz)}` : `<b>${esc(v.n)}</b> dispatched to ${esc(j.from.name||j.from.biz)}, ${esc(cityName(j.from.c))}`);
+      selectedJob=null; save(); drawJobs(); renderPanel();
+    }
     return;
   }
   if(a==="buy"){
@@ -1603,7 +1628,8 @@ $("#panelBody").addEventListener("click", e=>{
 });
 $("#panelBody").addEventListener("keydown", e=>{ if(e.key==="Enter" && e.target.id?.startsWith("ren-")){ e.preventDefault(); $(`[data-act=ren][data-id="${e.target.id.slice(4)}"]`)?.click(); }
   if(e.key==="Enter" && e.target.id?.startsWith("renh-")){ e.preventDefault(); $(`[data-act=renHub][data-id="${e.target.id.slice(5)}"]`)?.click(); } if(e.key==="Escape" && e.target.id?.startsWith("ren-")){ pendingConfirm=null; renderPanel(); } });
-$("#panelBody").addEventListener("change", e=>{ if(e.target.name==="veh") chosenVeh=e.target.value; if(e.target.id==="vehPick"){ chosenVeh = e.target.value || null; renderPanel(); } if(e.target.id==="hdrCustom"){ setHeaderColor(e.target.value); renderPanel(); } if(e.target.id==="testToggle"){ S.test = e.target.checked; save(); renderPanel(); } });
+$("#panelBody").addEventListener("change", e=>{ if(e.target.name==="veh") chosenVeh=e.target.value; if(e.target.id==="vehPick"){ chosenVeh = e.target.value || null; extraSel = new Set(); renderPanel(); }
+  if(e.target.name==="extra"){ e.target.checked ? extraSel.add(e.target.value) : extraSel.delete(e.target.value); const y=$("#panelBody").scrollTop; renderPanel(); $("#panelBody").scrollTop=y; } if(e.target.id==="hdrCustom"){ setHeaderColor(e.target.value); renderPanel(); } if(e.target.id==="testToggle"){ S.test = e.target.checked; save(); renderPanel(); } });
 document.querySelectorAll(".tab[data-tab]").forEach(b=>b.addEventListener("click",()=>{ closeMenu(); setTab(b.dataset.tab); }));
 // Menu dropdown for Fleet, Shop, Crew, Tasks, Log and Company
 function closeMenu(){ $("#menu").hidden = true; $("#menuBtn").setAttribute("aria-expanded","false"); }
