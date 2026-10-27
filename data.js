@@ -96,6 +96,8 @@ const levelSlots = L => SLOT_STEPS.filter(([l])=>l<=L).pop()[1];
 const nextSlotStep = L => SLOT_STEPS.find(([l])=>l>L);
 const MOVE_HUB_PRICE = [10000, 20000, 35000];   // moving a small, medium or large hub
 const RANGE_OPTS = [50, 100, 200, 300], DEFAULT_RANGE = 200;   // how far from a hub truck pickups can be
+/* Rush jobs: priority and express pay more and earn extra XP (standard jobs earn 1 XP per $100). */
+const URG = {standard:{pay:1, xp:1}, priority:{pay:1.5, xp:2}, express:{pay:2.25, xp:3}};
 const JOB_BOARD_MAX = 25;     // most jobs a board (truck, train or air) holds at once
 const JOB_EVERY_MS = 60000;   // a new job posts every minute on each board while it has room
 
