@@ -1126,7 +1126,7 @@ function renderFleet(){
         h += `<div class="card" id="vc-${v.id}"><div class="row"><b><span class="vic">${iconSvg(TYPE[v.type].mode,13)}</span>${esc(v.n)}</b><span class="status busy" data-ph="${tr.id}">${esc(phaseText(tr,t))}</span></div>
           <div class="meta"><span>${esc(ds)}</span><span class="num">${roomStr(ty, used)} loaded or booked</span><span class="num">${Math.round(v.miles||0).toLocaleString("en-US")} mi lifetime</span></div>
           <div class="prog"><i data-prog="${tr.id}" style="width:${pct}%"></i></div>
-          <ul class="loads">${tr.loads.map(l=>`<li class="${l.delivered?"done":""}"><span>${esc(l.job.from.name||l.job.from.biz)} <span class="arrow">→</span> ${esc(l.job.to.name||l.job.to.biz)}</span><span class="num">${weightStr(l.job)}</span><span class="lst">${l.delivered?"Last delivered":l.picked?"On board":"Waiting for pickup"}</span><span class="num">${money(l.job.pay*(1-(l.cut||0)))}</span></li>`).join("")}</ul>
+          <ul class="loads">${tr.loads.filter(l=>!l.delivered).map(l=>`<li class="${l.delivered?"done":""}"><span>${esc(l.job.from.name||l.job.from.biz)} <span class="arrow">→</span> ${esc(l.job.to.name||l.job.to.biz)}</span><span class="num">${weightStr(l.job)}</span><span class="lst">${l.delivered?"Last delivered":l.picked?"On board":"Waiting for pickup"}</span><span class="num">${money(l.job.pay*(1-(l.cut||0)))}</span></li>`).join("")}</ul>
           <div class="meta"><span>${ns.label} <span class="num" data-eta="${tr.id}">${dur(ns.t-t)}</span></span><span>${used<ty.cap&&openLoads(tr).length<MAX_LOADS?"Room for more loads":"Full"}</span></div>
           <div class="btnrow"><button class="btn ghost sm" data-act="follow" data-id="${tr.id}">Follow on map</button><button class="btn ghost sm" data-act="askRen" data-id="${v.id}">Rename</button></div>${pendingConfirm===("ren"+v.id)?`<div class="btnrow"><input type="text" id="ren-${v.id}" maxlength="24" value="${esc(v.n)}" aria-label="New name for ${esc(v.n)}" style="flex:1;min-width:0;width:auto"><button class="btn sm" data-act="ren" data-id="${v.id}">Save</button><button class="btn ghost sm" data-act="cancel">Cancel</button></div>`:""}</div>`;
       } else {
@@ -1175,7 +1175,7 @@ function trainCard(v, t){
   if(tr){
     const pct = Math.min(100,(t-tr.startAt)/((tr.endAt-tr.startAt)||1)*100), ns = nextStopAt(tr,t);
     h += `<div class="prog"><i data-prog="${tr.id}" style="width:${pct}%"></i></div>
-      <ul class="loads">${tr.loads.map(l=>`<li class="${l.delivered?"done":""}"><span>${esc(l.job.from.name)} <span class="arrow">→</span> ${esc(l.job.to.name)}</span><span class="num">${esc(railUnitWord(l.job.carType,l.job.units))}</span><span class="lst">${l.delivered?"Last delivered":l.picked?"On board":"Waiting for pickup"}</span><span class="num">${money(l.job.pay*(1-(l.cut||0)))}</span></li>`).join("")}</ul>
+      <ul class="loads">${tr.loads.filter(l=>!l.delivered).map(l=>`<li class="${l.delivered?"done":""}"><span>${esc(l.job.from.name)} <span class="arrow">→</span> ${esc(l.job.to.name)}</span><span class="num">${esc(railUnitWord(l.job.carType,l.job.units))}</span><span class="lst">${l.delivered?"Last delivered":l.picked?"On board":"Waiting for pickup"}</span><span class="num">${money(l.job.pay*(1-(l.cut||0)))}</span></li>`).join("")}</ul>
       <div class="meta"><span>${ns.label} <span class="num" data-eta="${tr.id}">${dur(ns.t-t)}</span></span></div>
       <div class="btnrow"><button class="btn ghost sm" data-act="follow" data-id="${tr.id}">Follow on map</button></div>`;
   } else if(trainCarCount(v) < ty.maxCars){
@@ -1193,7 +1193,7 @@ function planeCard(v, t){
   if(tr){
     const pct = Math.min(100,(t-tr.startAt)/((tr.endAt-tr.startAt)||1)*100), ns = nextStopAt(tr,t);
     h += `<div class="prog"><i data-prog="${tr.id}" style="width:${pct}%"></i></div>
-      <ul class="loads">${tr.loads.map(l=>`<li class="${l.delivered?"done":""}"><span>${esc(l.job.from.airport)} <span class="arrow">→</span> ${esc(l.job.to.airport)} · ${esc(CARGO[l.job.cargo].n)}</span><span class="num">${weightStr(l.job)}</span><span class="lst">${l.delivered?"Last delivered":l.picked?"On board":"Waiting for pickup"}</span><span class="num">${money(l.job.pay*(1-(l.cut||0)))}</span></li>`).join("")}</ul>
+      <ul class="loads">${tr.loads.filter(l=>!l.delivered).map(l=>`<li class="${l.delivered?"done":""}"><span>${esc(l.job.from.airport)} <span class="arrow">→</span> ${esc(l.job.to.airport)} · ${esc(CARGO[l.job.cargo].n)}</span><span class="num">${weightStr(l.job)}</span><span class="lst">${l.delivered?"Last delivered":l.picked?"On board":"Waiting for pickup"}</span><span class="num">${money(l.job.pay*(1-(l.cut||0)))}</span></li>`).join("")}</ul>
       <div class="meta"><span>${ns.label} <span class="num" data-eta="${tr.id}">${dur(ns.t-t)}</span></span><span class="num">${roomStr(ty, usedRoom(tr))} booked</span></div>
       <div class="btnrow"><button class="btn ghost sm" data-act="follow" data-id="${tr.id}">Follow on map</button></div>`;
   }
