@@ -510,11 +510,12 @@ let awayLog = null, simulating = false, simT = 0;
 const simWhen = () => awayLog ? awayLog.start + simT : Date.now();
 function deliverLoad(tr, ld){
   ld.delivered = true;
-  const j = ld.job, gross = j.pay, net = gross*(1-(ld.cut||0))*S.payMult;
+  const j = ld.job, gross = j.pay, net = gross*(1-(ld.cut||0))*S.payMult*(1+alPerk());
   const before = level();
   S.cash += net; S.earned += net; S.xp += jobXp(j); S.jobsDone++;
   recordDelivery({job:j, haulMi:j.miles}, net);
   contractDelivered(j);
+  alDelivered(j);
   const v = S.vehicles.find(x=>x.id===tr.v); if(v) v.jobs++;
   tr.drivers.forEach(id=>{const d=S.drivers.find(x=>x.id===id); if(d){d.jobs++;}});
   const what = j.event ? esc(j.item.toLowerCase()) : esc(CARGO[j.cargo].n.toLowerCase());
@@ -1242,7 +1243,7 @@ function cargoChip(c){ return `<span class="chip" style="color:var(--c-${c})"><i
 function urgTag(u){ return !URG[u] || u==="standard" ? "" : `<span class="urg ${u}" title="${URG[u].pay}× pay, ${URG[u].xp}× XP">${u} · ${URG[u].xp}× XP</span>`; }
 // XP for a delivery: 1 per $100 of pay, doubled for priority and tripled for express.
 const jobXp = j => j.pay/100 * (URG[j.urg]||URG.standard).xp;
-const MENU_PAGES = {fleet:"Fleet", contracts:"Contracts", shop:"Shop", crew:"Crew", tasks:"Tasks", log:"Log", company:"Company", account:"Account", settings:"Settings"};
+const MENU_PAGES = {fleet:"Fleet", contracts:"Contracts", alliance:"Alliance", shop:"Shop", crew:"Crew", tasks:"Tasks", log:"Log", company:"Company", account:"Account", settings:"Settings"};
 function markTabs(){
   document.querySelectorAll(".tab[data-tab]").forEach(b=>b.setAttribute("aria-selected", b.dataset.tab===tab));
   const inMenu = tab in MENU_PAGES;
@@ -1721,7 +1722,7 @@ function renderCompany(){
 }
 function renderHeader(){
   const L_ = level(), a = xpNeed(L_), b = xpNeed(L_+1);
-  $("#hdrCo").textContent = S.company;
+  $("#hdrCo").textContent = S.company + (AL?.alliance && S.alliance===AL.alliance.id ? ` [${AL.alliance.tag}]` : "");
   $("#hdrCash").textContent = money(S.cash);
   $("#hdrLvl").textContent = `Level ${L_} · ${Math.floor(S.xp-a).toLocaleString("en-US")}/${(b-a).toLocaleString("en-US")} XP`;
   $("#hdrXp").style.width = (L_>=50?100:Math.min(100,(S.xp-a)/(b-a)*100)) + "%";
@@ -1735,7 +1736,7 @@ function renderPanel(){
   if(!S) return;
   const body = $("#panelBody"), st = body.scrollTop;
   const ae = document.activeElement, keep = ae && ae.id && body.contains(ae) && ae.tagName==="INPUT" ? {id:ae.id, v:ae.value, a:ae.selectionStart, b:ae.selectionEnd} : null;
-  body.innerHTML = tab==="jobs"?renderJobs("truck"):tab==="rail"?renderJobs("rail"):tab==="air"?renderJobs("air"):tab==="fleet"?renderFleet():tab==="shop"?renderShop():tab==="crew"?renderCrew():tab==="log"?renderLog():tab==="tasks"?renderTasks():tab==="settings"?renderSettings():tab==="contracts"?renderContracts():tab==="account"?renderAccount():renderCompany();
+  body.innerHTML = tab==="jobs"?renderJobs("truck"):tab==="rail"?renderJobs("rail"):tab==="air"?renderJobs("air"):tab==="fleet"?renderFleet():tab==="shop"?renderShop():tab==="crew"?renderCrew():tab==="log"?renderLog():tab==="tasks"?renderTasks():tab==="settings"?renderSettings():tab==="contracts"?renderContracts():tab==="account"?renderAccount():tab==="alliance"?renderAlliance():renderCompany();
   body.scrollTop = st;
   if(Date.now() < flash.until) document.getElementById("vc-"+flash.id)?.classList.add("flash");
   if(keep){ const el = document.getElementById(keep.id); if(el){ el.value = keep.v; el.focus(); try{ el.setSelectionRange(keep.a, keep.b); }catch(_){} } }
@@ -1835,6 +1836,8 @@ $("#panelBody").addEventListener("click", e=>{
   if(a==="addCash"){ if(!S.test) return; const n = +el.dataset.n; S.cash += n; logEvent(`Test mode: added ${money(n)}`); save(); refresh(); return; }
   if(a==="toggleSec"){ const k = el.dataset.k; collapsed.has(k) ? collapsed.delete(k) : collapsed.add(k); try{ localStorage.setItem("freight-dispatch-collapsed", JSON.stringify([...collapsed])); }catch(_){} renderPanel(); return; }
   if(a==="range"){ const m=+el.dataset.m; if(RANGE_OPTS.includes(m)){ S.range=m; pruneOutOfRange(); drawBases(); drawJobs(); save(); refresh(); toast(`Truck jobs now post within ${m} mi of your hubs`); } return; }
+  if(a.startsWith("al") && alAct(a, id, el)) return;
+  if(a==="askKick"||a==="askLeave"){ alAct(a, id, el); return; }
   if(a==="cloudSave"){ cloudPush(true); return; }
   if(a==="signOut"){ cloudPush(true).finally(()=>window.Cloud?.signOut()); toast("Signed out. This device keeps a copy of your company."); return; }
   if(a==="sound"){ try{ localStorage.setItem("freight-dispatch-sound", el.dataset.v); }catch(_){} renderPanel(); return; }
@@ -1854,6 +1857,7 @@ $("#panelBody").addEventListener("click", e=>{
 });
 $("#panelBody").addEventListener("keydown", e=>{ if(e.key==="Enter" && e.target.id?.startsWith("ren-")){ e.preventDefault(); $(`[data-act=ren][data-id="${e.target.id.slice(4)}"]`)?.click(); }
   if(e.key==="Enter" && e.target.id?.startsWith("renh-")){ e.preventDefault(); $(`[data-act=renHub][data-id="${e.target.id.slice(5)}"]`)?.click(); } if(e.key==="Escape" && e.target.id?.startsWith("ren-")){ pendingConfirm=null; renderPanel(); } });
+$("#panelBody").addEventListener("input", e=>{ if(e.target.id==="alSearch"){ alSearch = e.target.value; renderPanel(); } });
 $("#panelBody").addEventListener("change", e=>{ if(e.target.name==="veh") chosenVeh=e.target.value; if(e.target.id==="jobSort"){ jobSort = {k:e.target.value, dir:SORTS[e.target.value][1]}; saveSort(); renderPanel(); }
   if(e.target.id==="vehPick"){ chosenVeh = e.target.value || null; extraSel = new Set(); renderPanel(); }
   if(e.target.name==="extra"){ e.target.checked ? extraSel.add(e.target.value) : extraSel.delete(e.target.value); const y=$("#panelBody").scrollTop; renderPanel(); $("#panelBody").scrollTop=y; } if(e.target.id==="hdrCustom"){ setHeaderColor(e.target.value); renderPanel(); } if(e.target.id==="testToggle"){ S.test = e.target.checked; save(); renderPanel(); } });
@@ -2070,6 +2074,160 @@ function renderAccount(){
     ${cloudErr?`<p class="need">${esc(cloudErr)}</p>`:""}
     <p class="hint">Your company saves to your account about once a minute and when you leave the game. Open the game on another device and sign in with the same email to keep playing there. Play on one device at a time; the most recent save wins.</p>
     <div class="btnrow"><button class="btn sm" data-act="cloudSave" ${cloudSynced?"":"disabled"}>Save now</button><button class="btn ghost sm" data-act="signOut">Sign out</button></div></section>`;
+}
+
+/* ---------------- Alliances ----------------
+   Needs an account. Members share contracts far bigger than one company could run: every matching delivery
+   any member makes counts. When a contract is done, each member claims a bonus for the loads they delivered,
+   and the alliance gains XP. Alliance level adds to every member's job pay. */
+const AL_CONTRACTS = [
+  {id:"drive",  n:"Freight Drive",  cargo:"any",          per:25, min:40, hours:24, bonus:300, xp:100, cost:0,
+   blurb:"Deliver any freight: trucks, trains and planes all count."},
+  {id:"furn",   n:"Furniture Push", cargo:"furniture",    per:15, min:25, hours:24, bonus:500, xp:150, cost:0,
+   blurb:"Furniture loads only."},
+  {id:"cold",   n:"Cold Chain",     cargo:"refrigerated", per:15, min:25, hours:24, bonus:600, xp:150, cost:0,
+   blurb:"Refrigerated loads only."},
+  {id:"big",    n:"Big Haul",       cargo:"any",          per:60, min:100, hours:48, bonus:800, xp:400, cost:250000,
+   blurb:"A huge order for any freight. Paid for from the alliance bank."}
+];
+const AL_LVL_XP = 300, AL_MAX_LVL = 10;
+const alLevel = a => Math.min(AL_MAX_LVL, 1 + Math.floor((a?.xp||0)/AL_LVL_XP));
+let AL = null, alUnsub = null, alWatching = null, alQueue = 0, alList = null, alListAt = 0, alBusy = false, alErr = "", alMsg = "";
+const alMe = () => window.Cloud?.user?.uid;
+const alPerk = () => AL?.alliance && S?.alliance === AL.alliance.id ? alLevel(AL.alliance) / 100 : 0;   // +1% pay per alliance level
+const alActive = () => AL?.alliance?.active ? AL.contracts.find(c=>c.id===AL.alliance.active) : null;
+const alInfo = () => ({company:S.company, level:level()});
+// Start or stop live updates when the account or alliance changes.
+function alSync(){
+  const want = alMe() && S?.alliance ? S.alliance : null;
+  if(want === alWatching) return;
+  if(alUnsub){ alUnsub(); alUnsub = null; } AL = null; alWatching = want;
+  if(!want || !window.Cloud?.al) return;
+  alUnsub = window.Cloud.al.watch(want, st=>{
+    AL = st;
+    const closed = st.la && !st.alliance, removed = st.la && st.lm && st.alliance && !st.members.some(m=>m.uid===alMe());
+    if(closed || removed){ toast(closed ? "Your alliance was closed." : `You are no longer in ${esc(st.alliance.name)}.`); S.alliance = null; AL = null; save(); alSync(); if(tab==="alliance") renderPanel(); return; }
+    const c = alActive(); if(c && Date.now() > c.deadline) window.Cloud.al.expire(want, c.id).catch(()=>{});
+    if(tab==="alliance") renderPanel(); renderHeader();
+  });
+}
+// Every delivery: count it toward the alliance contract if the cargo matches.
+function alDelivered(j){
+  const c = alActive(); if(!c || Date.now() > c.deadline) return;
+  if(c.cargo==="any" || c.cargo===j.cargo){ alQueue++; }
+}
+async function alFlush(){
+  const c = alActive(); if(!alQueue || !c || !S?.alliance) { if(!c) alQueue = 0; return; }
+  const n = alQueue; alQueue = 0;
+  try{ await window.Cloud.al.contribute(S.alliance, c.id, n); }catch(_){ alQueue += n; }
+}
+setInterval(alFlush, 20000);
+setInterval(()=>{ if(AL?.alliance && alMe()) window.Cloud.al.touch(S.alliance, alInfo()).catch(()=>{}); }, 5*60e3);
+document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="hidden") alFlush(); });
+window.addEventListener("cloud-auth", ()=>setTimeout(alSync, 1500));
+
+async function alDo(fn, ok){
+  if(alBusy) return; alBusy = true; alErr = ""; alMsg = ""; renderPanel();
+  try{ await fn(); if(ok) alMsg = ok; }
+  catch(e){ alErr = ({full:"That alliance is full.", busy:"A contract is already running.", bank:"Not enough money in the alliance bank.", gone:"That alliance no longer exists."})[e.message] || "Couldn't reach the server. Try again."; }
+  alBusy = false; renderPanel();
+}
+async function alLoadList(force){
+  if(!force && alList && Date.now()-alListAt < 60e3) return;
+  try{ alList = await window.Cloud.al.list(); alListAt = Date.now(); }catch(_){ alList = []; alErr = "Couldn't load alliances. Try again."; }
+  if(tab==="alliance") renderPanel();
+}
+const alTarget = (o, n) => Math.max(o.min, o.per*n);
+const ago = t => { const m = Math.floor((Date.now()-t)/60000); return m<2?"online": m<60?`${m}m ago`: m<1440?`${Math.floor(m/60)}h ago`:`${Math.floor(m/1440)}d ago`; };
+function renderAlliance(){
+  let h = `<section class="sec"><h2>Alliance</h2>`;
+  if(!window.Cloud) return h+`<p class="hint">Loading…</p></section>`;
+  if(!alMe()) return h+`<p class="hint">Alliances are groups of players who take on big shared contracts together. Sign in first so other players can find you.</p><div class="btnrow"><button class="btn sm" data-act="tab" data-tab="account">Sign in</button></div></section>`;
+  const note = `${alErr?`<p class="need">${esc(alErr)}</p>`:""}${alMsg?`<p class="ok">${esc(alMsg)}</p>`:""}`;
+  if(!S.alliance){
+    if(!alList) alLoadList();
+    const q = (alSearch||"").toLowerCase(), list = (alList||[]).filter(a=>!q || a.name.toLowerCase().includes(q) || (a.tag||"").toLowerCase().includes(q));
+    return h+`<p class="hint">Join a group of players to run shared contracts far bigger than one company could do. Every member's matching deliveries count, everyone who helps gets a bonus, and the alliance levels up for extra pay on all your jobs (+1% per alliance level, up to +${AL_MAX_LVL}%).</p>${note}</section>
+      <section class="sec ${cz("al-create")}">${secHead("al-create","Start an alliance")}
+        <label class="fld">Name<input type="text" id="alName" maxlength="28" placeholder="Southern Freight Alliance"></label>
+        <label class="fld">Tag (2–5 letters)<input type="text" id="alTag" maxlength="5" placeholder="SFA" style="text-transform:uppercase"></label>
+        <label class="fld">Short description (optional)<input type="text" id="alDesc" maxlength="80"></label>
+        <div class="btnrow"><button class="btn sm" data-act="alCreate" ${alBusy?"disabled":""}>Create alliance</button></div></section>
+      <section class="sec ${cz("al-join")}">${secHead("al-join","Join an alliance",`<button class="btn ghost sm" data-act="alRefresh">Refresh</button>`)}
+        <label class="fld"><input type="search" id="alSearch" placeholder="Search by name or tag" value="${esc(alSearch||"")}"></label>
+        ${!alList?`<p class="hint">Loading…</p>`:list.length?`<div class="list">${list.map(a=>`<div class="card"><div class="row"><b>${esc(a.name)} <span class="hint">[${esc(a.tag)}]</span></b><span class="num">${a.members||0}/${window.Cloud.al.MAX_MEMBERS}</span></div>
+          <div class="meta"><span>Level ${alLevel(a)}</span>${a.desc?`<span>${esc(a.desc)}</span>`:""}</div>
+          <div class="btnrow"><button class="btn sm" data-act="alJoin" data-id="${a.id}" ${alBusy||(a.members||0)>=window.Cloud.al.MAX_MEMBERS?"disabled":""}>${(a.members||0)>=window.Cloud.al.MAX_MEMBERS?"Full":"Join"}</button></div></div>`).join("")}</div>`:`<p class="hint">No alliances yet${q?" match that search":""}. Start one above.</p>`}</section>`;
+  }
+  if(!AL || !AL.alliance) return h+`<p class="hint">Loading your alliance…</p>${note}</section>`;
+  const a = AL.alliance, me = alMe(), lead = a.leader===me, lv = alLevel(a), n = AL.members.length || a.members || 1;
+  const c = alActive(), mine = c ? (c.contributions?.[me]||0) : 0;
+  h += `<div class="row"><b style="font-size:17px">${esc(a.name)} <span class="hint">[${esc(a.tag)}]</span></b><span class="num">Level ${lv}</span></div>
+    <div class="meta"><span>${n}/${window.Cloud.al.MAX_MEMBERS} members</span><span>+${lv}% pay on all your jobs</span>${a.desc?`<span>${esc(a.desc)}</span>`:""}</div>
+    ${lv<AL_MAX_LVL?`${bar((a.xp||0)%AL_LVL_XP, AL_LVL_XP)}<p class="hint" style="margin:0">${(a.xp||0)%AL_LVL_XP} / ${AL_LVL_XP} XP to level ${lv+1}. Finish contracts to earn alliance XP.</p>`:""}${note}</section>`;
+  // Running contract
+  h += `<section class="sec ${cz("al-contract")}">${secHead("al-contract","Alliance contract")}`;
+  if(c){
+    const left = c.deadline - Date.now();
+    h += `<div class="card"><div class="row"><b>${esc(c.n)}</b><span class="pay">${money(c.bonus)} per load</span></div>
+      <p class="hint" style="margin:0">${esc(c.blurb)}</p>${bar(Math.min(c.delivered,c.target), c.target)}
+      <div class="meta"><span class="num">${c.delivered.toLocaleString("en-US")} / ${c.target.toLocaleString("en-US")} loads</span><span>You: <b class="num">${mine}</b>${alQueue?` (+${alQueue} sending)`:""}</span><span>${left>0?`ends in ${longDur(left)}`:"time's up"}</span></div>
+      <p class="hint" style="margin:0">When it's done, you get ${money(c.bonus)} for each load you delivered and the alliance gets ${c.xp} XP. Miss the deadline and there's no bonus.</p></div>`;
+  } else {
+    h += `<p class="hint">No contract running. ${lead?"Pick one to start. Targets grow with the number of members.":"The leader starts the next one."}</p>`;
+    if(lead) h += `<div class="list">${AL_CONTRACTS.map(o=>{ const t = alTarget(o, n), poor = o.cost > (a.bank||0);
+      return `<div class="card"><div class="row"><b>${esc(o.n)}</b><span class="pay">${money(o.bonus)} per load</span></div><p class="hint" style="margin:0">${esc(o.blurb)}</p>
+        <div class="meta"><span class="num">${t} loads</span><span class="num">${o.hours} h</span><span>+${o.xp} alliance XP</span>${o.cost?`<span class="num">costs ${money(o.cost)} from the bank</span>`:""}</div>
+        <div class="btnrow"><button class="btn sm" data-act="alStart" data-id="${o.id}" ${alBusy||poor?"disabled":""}>${poor?"Not enough in the bank":"Start contract"}</button></div></div>`; }).join("")}</div>`;
+  }
+  // Rewards to claim from finished contracts
+  const claim = AL.contracts.filter(x=>x.status==="done" && (x.contributions?.[me]||0) > 0 && !x.claimed?.[me]);
+  if(claim.length) h += `<div class="list">${claim.map(x=>`<div class="task"><div class="row"><span><b>${esc(x.n)}</b> complete · you delivered ${x.contributions[me]} loads</span><span class="pay">${money(x.contributions[me]*x.bonus)}</span></div><div class="btnrow"><button class="btn sm" data-act="alClaim" data-id="${x.id}" ${alBusy?"disabled":""}>Claim</button></div></div>`).join("")}</div>`;
+  const past = AL.contracts.filter(x=>x.status!=="active").slice(0, 4);
+  if(past.length) h += `<p class="hint" style="margin-top:8px">Recent: ${past.map(x=>`${esc(x.n)} ${x.status==="done"?"✓ done":"✗ missed"} (${x.delivered}/${x.target})`).join(" · ")}</p>`;
+  h += `</section>`;
+  // Bank
+  h += `<section class="sec ${cz("al-bank")}">${secHead("al-bank","Alliance bank",`<span class="num">${money(a.bank||0)}</span>`)}
+    <p class="hint">Members chip in so the leader can start bigger contracts like Big Haul.</p>
+    <div class="btnrow"><input type="number" id="alDonate" min="1000" step="1000" placeholder="Amount" style="flex:1;min-width:0;width:auto"><button class="btn sm" data-act="alDonate" ${alBusy?"disabled":""}>Donate</button></div></section>`;
+  // Members
+  const ms = AL.members.slice().sort((x,y)=>(y.uid===a.leader)-(x.uid===a.leader) || (y.loads||0)-(x.loads||0));
+  h += `<section class="sec ${cz("al-members")}">${secHead("al-members","Members",`<span class="hint num">${ms.length}</span>`)}<div class="list">${ms.map(m=>{ const conf = pendingConfirm===("kick"+m.uid);
+    return `<div class="card"><div class="row"><b>${esc(m.company||"Company")}${m.uid===me?" (you)":""}</b><span class="hint">${m.uid===a.leader?"Leader":ago(m.lastSeen||0)}</span></div>
+      <div class="meta"><span>Level ${m.level||1}</span><span class="num">${(m.loads||0).toLocaleString("en-US")} alliance loads</span>${m.uid===a.leader?`<span>${ago(m.lastSeen||0)}</span>`:""}</div>
+      ${lead && m.uid!==me ? `<div class="btnrow">${conf?`<button class="btn warn sm" data-act="alKick" data-id="${m.uid}">Remove ${esc(m.company||"member")}</button><button class="btn ghost sm" data-act="cancel">Cancel</button>`:`<button class="btn ghost sm" data-act="alLead" data-id="${m.uid}">Make leader</button><button class="btn ghost sm" data-act="askKick" data-id="${m.uid}">Remove</button>`}</div>`:""}</div>`; }).join("")}</div></section>`;
+  // Feed
+  h += `<section class="sec ${cz("al-feed")}">${secHead("al-feed","Activity")}<ul class="feed">${AL.feed.map(f=>`<li><span class="hint num">${ago(f.t)==="online"?"now":ago(f.t)}</span> ${esc(f.text)}</li>`).join("")||`<li class="hint">Nothing yet.</li>`}</ul></section>`;
+  const conf = pendingConfirm==="alLeave";
+  h += `<section class="sec"><div class="btnrow">${conf?`<button class="btn warn sm" data-act="alLeave">${lead&&n<=1?"Close the alliance":"Leave the alliance"}</button><button class="btn ghost sm" data-act="cancel">Stay</button>`:`<button class="btn ghost sm" data-act="askLeave">Leave alliance</button>`}</div>
+    ${lead&&n>1?`<p class="hint">If you leave, the longest-serving member becomes leader.</p>`:""}</section>`;
+  return h;
+}
+let alSearch = "";
+function alAct(a, id, el){
+  const C = window.Cloud?.al; if(!C) return false;
+  if(a==="alRefresh"){ alLoadList(true); return true; }
+  if(a==="alCreate"){
+    const name = ($("#alName").value||"").trim(), tag = ($("#alTag").value||"").trim().toUpperCase(), desc = ($("#alDesc").value||"").trim();
+    if(name.length<3){ alErr = "Give the alliance a name (3+ letters)."; renderPanel(); return true; }
+    if(!/^[A-Z0-9]{2,5}$/.test(tag)){ alErr = "Pick a tag of 2–5 letters or numbers."; renderPanel(); return true; }
+    alDo(async ()=>{ const aid = await C.create({name, tag, desc}, alInfo()); S.alliance = aid; save(); cloudPush(true); alSync(); }, `${name} is open. Invite friends to join it from Menu → Alliance.`);
+    return true;
+  }
+  if(a==="alJoin"){ alDo(async ()=>{ await C.join(id, alInfo()); S.alliance = id; save(); cloudPush(true); alSync(); }, "Welcome to the alliance!"); return true; }
+  if(a==="alStart"){ const o = AL_CONTRACTS.find(x=>x.id===id), n = AL.members.length||1;
+    alDo(()=>C.start(S.alliance, {kind:o.id, n:o.n, blurb:o.blurb, cargo:o.cargo, target:alTarget(o,n), bonus:o.bonus, xp:o.xp, cost:o.cost, deadline:Date.now()+o.hours*3600e3}, S.company)); return true; }
+  if(a==="alClaim"){ alDo(async ()=>{ const x = AL.contracts.find(c=>c.id===id), n = await C.claim(S.alliance, id);
+      if(n && x){ const pay = n*x.bonus; S.cash += pay; S.earned += pay; logEvent(`Alliance contract <b>${esc(x.n)}</b>: claimed <span class="num">+${money(pay)}</span>`); toast(`Claimed <span class="num">${money(pay)}</span> for ${n} alliance loads`); save(); } }); return true; }
+  if(a==="alDonate"){ const amt = Math.floor(+($("#alDonate").value||0));
+    if(!(amt>0) || amt > S.cash){ alErr = amt>S.cash?"You don't have that much cash.":"Enter an amount."; renderPanel(); return true; }
+    S.cash -= amt; save(); alDo(()=>C.donate(S.alliance, amt, S.company).catch(e=>{ S.cash += amt; save(); throw e; }), `Donated ${money(amt)}.`); return true; }
+  if(a==="askKick"){ pendingConfirm="kick"+id; renderPanel(); return true; }
+  if(a==="alKick"){ const m = AL.members.find(x=>x.uid===id); pendingConfirm=null; alDo(()=>C.kick(S.alliance, id, m?.company||"A member")); return true; }
+  if(a==="alLead"){ alDo(()=>C.makeLeader(S.alliance, id), "Leadership handed over."); return true; }
+  if(a==="askLeave"){ pendingConfirm="alLeave"; renderPanel(); return true; }
+  if(a==="alLeave"){ pendingConfirm=null; const aid = S.alliance; alDo(async ()=>{ await alFlush(); await C.leave(aid, S.company); S.alliance = null; save(); cloudPush(true); alSync(); }, "You left the alliance."); return true; }
+  return false;
 }
 
 /* ---------------- Save / load ---------------- */
