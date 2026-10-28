@@ -1255,7 +1255,8 @@ function selectJob(id, fly){
   selectedJob=id; chosenVeh=null; extraSel = new Set();
   const j = S.jobs.find(x=>x.id===id);
   tab = !j ? "jobs" : j.air ? "air" : j.rail ? "rail" : "jobs"; markTabs(); if(j){ routeJob(j); if(fly) fitJob(j); }
-  if(j){ const kp = j.air ? "ja-" : j.rail ? "jr-" : "jt-"; [kp+"ready", kp+"other"].forEach(k=>collapsed.delete(k)); }
+  // Open only the section this job is in (it may be collapsed when you pick the job from a map pin).
+  if(j){ const kp = j.air ? "ja-" : j.rail ? "jr-" : "jt-"; collapsed.delete(kp + (jobStatus(j).can ? "ready" : "other")); }
   drawJobs(); renderPanel();
   // The dispatch card opens in place of the job you picked, so you stay where you were in the list.
   const card = $("#panelBody .dispatch"); if(card) card.scrollIntoView({block:"nearest"});
