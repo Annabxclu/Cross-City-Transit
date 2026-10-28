@@ -1562,13 +1562,16 @@ function secHead(k, title, extra=""){
 function renderShop(){
   const L_ = level();
   let h = `<section class="sec ${cz("trucks")}">${secHead("trucks","Trucks",`<span class="hint">60% back when sold</span>`)}<div class="list">`;
-  const baseOpts = S.bases.map(b=>{const n=S.vehicles.filter(v=>v.base===b.id).length;return `<option value="${b.id}" ${n>=hubCap(b)?"disabled":""}>${esc(baseName(b))} (${n}/${hubCap(b)})</option>`;}).join("");
+  // Each hub option says how many of this vehicle type you already have there.
+  const tName = (t, n) => { const w = t.n.replace(/ \(.*\)/,"").replace(/^Semi \+ /,"").toLowerCase(); return n===1 ? w : w.replace(/y$/,"ie")+"s"; };
+  const baseOpts = t => S.bases.map(b=>{ const n = S.vehicles.filter(v=>v.base===b.id).length, k = S.vehicles.filter(v=>v.base===b.id && v.type===t.id).length, full = n>=hubCap(b);
+    return `<option value="${b.id}" ${full?"disabled":""}>${esc(baseName(b))} · ${k ? `${k} ${tName(t,k)} owned` : `no ${tName(t,2)} yet`}${full?" · hub full":""}</option>`; }).join("");
   const anySlot = S.bases.some(b=>S.vehicles.filter(v=>v.base===b.id).length<hubCap(b));
   for(const t of TYPES){
     const locked = t.lvl>L_, poor = S.cash<t.price;
     h += `<div class="card ${locked?"dim":""}"><div class="row"><b><span class="vic">${iconSvg(t.mode,13)}</span>${esc(t.n)}</b><span class="num">${money(t.price)}</span></div>
-      <div class="meta"><span class="num">${t.cars?t.cap+" cars":t.cap.toLocaleString("en-US")+" lb"}</span><span class="num">${t.leg} mi range</span><span>${t.cargo.map(c=>CARGO[c].n).join(", ")}</span><span>${t.lic==="std"?"Any driver":t.lic==="cdl"?"CDL driver":"2 CDL drivers"}</span></div>
-      ${locked?`<span class="lock">Unlocks at level ${t.lvl}</span>`:`<div class="btnrow"><select aria-label="Hub for ${esc(t.n)}" id="bs-${t.id}" style="width:auto;flex:1;min-width:0">${baseOpts}</select><button class="btn sm" data-act="buy" data-id="${t.id}" ${poor||!anySlot?"disabled":""}>${poor?"Not enough cash":!anySlot?"Hubs full":"Buy"}</button></div>`}</div>`;
+      <div class="meta"><span class="num">${t.cars?t.cap+" cars":t.cap.toLocaleString("en-US")+" lb"}</span><span class="num">${t.leg} mi range</span><span>${t.cargo.map(c=>CARGO[c].n).join(", ")}</span><span>${t.lic==="std"?"Any driver":t.lic==="cdl"?"CDL driver":"2 CDL drivers"}</span>${(n=>n?`<span><b>You own ${n}</b></span>`:"")(S.vehicles.filter(v=>v.type===t.id).length)}</div>
+      ${locked?`<span class="lock">Unlocks at level ${t.lvl}</span>`:`<div class="btnrow"><select aria-label="Hub for ${esc(t.n)}" id="bs-${t.id}" style="width:auto;flex:1;min-width:0">${baseOpts(t)}</select><button class="btn sm" data-act="buy" data-id="${t.id}" ${poor||!anySlot?"disabled":""}>${poor?"Not enough cash":!anySlot?"Hubs full":"Buy"}</button></div>`}</div>`;
   }
   h += `</div></section>`;
   const used = new Set(S.bases.map(b=>b.city));
