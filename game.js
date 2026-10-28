@@ -1424,7 +1424,8 @@ function renderJobs(mode="truck"){
   { const trips = S.trips.filter(tr=>{ const v = S.vehicles.find(x=>x.id===tr.v); return v && vehKind(v)===kind; })
       .sort((a,b)=>nextDue(a)-nextDue(b));
     const nLoads = trips.reduce((n,tr)=>n+openLoads(tr).length, 0);
-    if(trips.length) h += `<section class="sec ${cz(kp+"active")}">${secHead(kp+"active","In progress",`<span class="hint num">${trips.length} ${kind==="air"?"plane":kind==="rail"?"train":"vehicle"}${trips.length>1?"s":""} · ${nLoads} load${nLoads===1?"":"s"}</span>`)}<div class="list">${trips.map(tripCard).join("")}</div></section>`; }
+    const owed = trips.reduce((n,tr)=>n+openLoads(tr).reduce((m,l)=>m+l.job.pay*(1-(l.cut||0)), 0), 0);
+    if(trips.length) h += `<section class="sec ${cz(kp+"active")}">${secHead(kp+"active","In progress",`<span class="hint num">${trips.length} ${kind==="air"?"plane":kind==="rail"?"train":"vehicle"}${trips.length>1?"s":""} · ${nLoads} load${nLoads===1?"":"s"} · <span class="pay" style="font-size:inherit">${money(owed)}</span></span>`)}<div class="list">${trips.map(tripCard).join("")}</div></section>`; }
   h += `<section class="sec ${cz(kp+"ready")}">${secHead(kp+"ready","Available jobs",`<span class="hint num">${can.length}</span>`)}${list.length>1?sortBar():""}${can.length?`<div class="list">${can.map(x=>x.j.id===selectedJob?dispatchCard(x.j):jobCard(x.j)).join("")}</div>`:`<p class="hint">Nothing your fleet can take right now. A new job posts every minute.</p>`}</section>`;
   if(cant.length) h += `<section class="sec ${cz(kp+"other")}">${secHead(kp+"other","Other jobs nearby",`<span class="hint num">${cant.length}</span>`)}<div class="list">${cant.map(x=>x.j.id===selectedJob?dispatchCard(x.j):jobCard(x.j)).join("")}</div></section>`;
   return h;
