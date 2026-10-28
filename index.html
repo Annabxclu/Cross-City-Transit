@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
-<link rel="stylesheet" href="style.css?v=76">
+<link rel="stylesheet" href="style.css?v=77">
 <style>html{color-scheme:light}body{margin:0}:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}[hidden]{display:none!important}</style>
 </head>
 <body>
@@ -45,6 +45,7 @@
           <button class="menuitem" data-tab="tasks">Tasks<span class="badge" id="taskBadge2" hidden>0</span></button>
           <button class="menuitem" data-tab="log">Log</button>
           <button class="menuitem" data-tab="company">Company</button>
+          <button class="menuitem" data-tab="account">Account</button>
           <button class="menuitem" data-tab="settings">Settings</button>
         </div>
       </div>
@@ -104,8 +105,16 @@
       <p class="hint">Next you'll click the map to place your first hub. It's free.</p>
       <div class="kit"><div><span class="hint">First hub</span><b>Free</b></div><div><span class="hint">Starting vehicle</span><b>Cargo van</b></div><div><span class="hint">Driver</span><b>1 hired</b></div></div>
       <button class="btn" type="submit">Open for business</button>
+      <div id="startAuth" class="start-auth"></div>
     </div>
   </form>
+</div>
+
+<div class="overlay" id="cloudOv" hidden>
+  <div class="dialog">
+    <div class="sign-strip"><div class="k">Account</div><div class="t">Pick your company</div></div>
+    <div class="body" id="cloudBody"></div>
+  </div>
 </div>
 
 <div class="overlay" id="loginOv" hidden>
@@ -123,7 +132,8 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-<script src="data.js?v=76"></script>
-<script src="game.js?v=76"></script>
+<script src="data.js?v=77"></script>
+<script src="game.js?v=77"></script>
+<script type="module" src="cloud.js?v=77"></script>
 </body>
 </html>

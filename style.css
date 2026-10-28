@@ -322,3 +322,8 @@ label.fld{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(
 .sortbar select{width:auto;flex:0 1 auto}
 .chip.contractchip{background:color-mix(in srgb, var(--sign) 14%, var(--surface));color:var(--ink)}
 .chip.contractchip i{background:var(--sign)}
+.start-auth details{border-top:1px solid var(--line);padding-top:10px}
+.start-auth summary{cursor:pointer;font-size:13px;color:var(--muted)}
+.start-auth details[open] summary{margin-bottom:8px}
+.start-auth .fld{margin-top:6px}
+#cloudBody .card{text-align:left;width:100%}

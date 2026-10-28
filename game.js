@@ -1242,7 +1242,7 @@ function cargoChip(c){ return `<span class="chip" style="color:var(--c-${c})"><i
 function urgTag(u){ return !URG[u] || u==="standard" ? "" : `<span class="urg ${u}" title="${URG[u].pay}× pay, ${URG[u].xp}× XP">${u} · ${URG[u].xp}× XP</span>`; }
 // XP for a delivery: 1 per $100 of pay, doubled for priority and tripled for express.
 const jobXp = j => j.pay/100 * (URG[j.urg]||URG.standard).xp;
-const MENU_PAGES = {fleet:"Fleet", contracts:"Contracts", shop:"Shop", crew:"Crew", tasks:"Tasks", log:"Log", company:"Company", settings:"Settings"};
+const MENU_PAGES = {fleet:"Fleet", contracts:"Contracts", shop:"Shop", crew:"Crew", tasks:"Tasks", log:"Log", company:"Company", account:"Account", settings:"Settings"};
 function markTabs(){
   document.querySelectorAll(".tab[data-tab]").forEach(b=>b.setAttribute("aria-selected", b.dataset.tab===tab));
   const inMenu = tab in MENU_PAGES;
@@ -1735,7 +1735,7 @@ function renderPanel(){
   if(!S) return;
   const body = $("#panelBody"), st = body.scrollTop;
   const ae = document.activeElement, keep = ae && ae.id && body.contains(ae) && ae.tagName==="INPUT" ? {id:ae.id, v:ae.value, a:ae.selectionStart, b:ae.selectionEnd} : null;
-  body.innerHTML = tab==="jobs"?renderJobs("truck"):tab==="rail"?renderJobs("rail"):tab==="air"?renderJobs("air"):tab==="fleet"?renderFleet():tab==="shop"?renderShop():tab==="crew"?renderCrew():tab==="log"?renderLog():tab==="tasks"?renderTasks():tab==="settings"?renderSettings():tab==="contracts"?renderContracts():renderCompany();
+  body.innerHTML = tab==="jobs"?renderJobs("truck"):tab==="rail"?renderJobs("rail"):tab==="air"?renderJobs("air"):tab==="fleet"?renderFleet():tab==="shop"?renderShop():tab==="crew"?renderCrew():tab==="log"?renderLog():tab==="tasks"?renderTasks():tab==="settings"?renderSettings():tab==="contracts"?renderContracts():tab==="account"?renderAccount():renderCompany();
   body.scrollTop = st;
   if(Date.now() < flash.until) document.getElementById("vc-"+flash.id)?.classList.add("flash");
   if(keep){ const el = document.getElementById(keep.id); if(el){ el.value = keep.v; el.focus(); try{ el.setSelectionRange(keep.a, keep.b); }catch(_){} } }
@@ -1835,6 +1835,8 @@ $("#panelBody").addEventListener("click", e=>{
   if(a==="addCash"){ if(!S.test) return; const n = +el.dataset.n; S.cash += n; logEvent(`Test mode: added ${money(n)}`); save(); refresh(); return; }
   if(a==="toggleSec"){ const k = el.dataset.k; collapsed.has(k) ? collapsed.delete(k) : collapsed.add(k); try{ localStorage.setItem("freight-dispatch-collapsed", JSON.stringify([...collapsed])); }catch(_){} renderPanel(); return; }
   if(a==="range"){ const m=+el.dataset.m; if(RANGE_OPTS.includes(m)){ S.range=m; pruneOutOfRange(); drawBases(); drawJobs(); save(); refresh(); toast(`Truck jobs now post within ${m} mi of your hubs`); } return; }
+  if(a==="cloudSave"){ cloudPush(true); return; }
+  if(a==="signOut"){ cloudPush(true).finally(()=>window.Cloud?.signOut()); toast("Signed out. This device keeps a copy of your company."); return; }
   if(a==="sound"){ try{ localStorage.setItem("freight-dispatch-sound", el.dataset.v); }catch(_){} renderPanel(); return; }
   if(a==="testSound"){ unlockAudio(); setTimeout(()=>chime("truck", true), 50); return; }
   if(a==="hdrColor"){ setHeaderColor(el.dataset.c); renderPanel(); return; }
@@ -1876,7 +1878,7 @@ function refresh(){ drawJobs(); renderPanel(); }
 function showStart(){
   const ss = $("#stSel");
   ss.innerHTML = Object.entries(STATES).map(([k,n])=>`<option value="${k}" ${k==="GA"?"selected":""}>${n}</option>`).join("");
-  $("#startOv").hidden = false;
+  $("#startOv").hidden = false; renderStartAuth();
   map.setView([38.5,-96], 4);
 }
 $("#startForm").addEventListener("submit", e=>{
@@ -1960,6 +1962,116 @@ function buildHub(){
   toast(`Opened <b>${esc(name)}</b> at ${esc(p.info.line)}`); drawBases(); save(); refresh();
 }
 
+/* ---------------- Account and cloud saves ----------------
+   Signed in, the company is saved to your account about once a minute and whenever you leave the page,
+   so the same company opens on any device. Without an account the game saves in this browser only. */
+let authEmail = "", localBase = 0, cloudSynced = false, cloudDirty = false, cloudLast = 0, cloudBusy = false, cloudMsg = "", cloudErr = "";
+const cloudUser = () => window.Cloud?.user || null;
+function cloudData(){
+  // Road and rail geometry is big and can be fetched again, so it isn't stored in the cloud copy.
+  const o = JSON.parse(JSON.stringify(S, (k,v)=>k==="cum"?undefined:v));
+  o.jobs.forEach(j=>{ if(!j.air){ delete j.path; j.routed = false; } });
+  o.trips.forEach(t=>t.segs.forEach(sg=>{ if(sg.path && sg.path.length>2) sg.path = [sg.path[0], sg.path[sg.path.length-1]]; }));
+  return JSON.stringify(o);
+}
+async function cloudPush(force){
+  if(!S || reloading || !cloudUser() || !cloudSynced || cloudBusy) return;
+  if(!force && !cloudDirty && Date.now()-cloudLast < 10*60e3) return;
+  cloudBusy = true;
+  try{
+    S.savedAt = Date.now(); S.cloudUid = cloudUser().uid; save();
+    await window.Cloud.push(cloudData(), {savedAt:S.savedAt, company:S.company, level:level(), cash:Math.round(S.cash)});
+    cloudLast = Date.now(); cloudDirty = false; cloudErr = "";
+  }catch(e){ cloudErr = "Couldn't reach the cloud. Your game is still saved on this device."; }
+  cloudBusy = false;
+  if(tab==="account") renderPanel();
+}
+// Replace the game in this browser with a save and reload the page so it starts cleanly.
+let reloading = false;   // once set, nothing may overwrite the save that is about to load
+function loadSaveAndReload(data){ reloading = true; try{ localStorage.setItem(KEY, data); }catch(_){} location.reload(); }
+async function onCloudAuth(u){
+  cloudSynced = false;
+  if(!u){ if(tab==="account") renderPanel(); renderStartAuth(); return; }
+  let remote = null;
+  try{ remote = await window.Cloud.pull(); }catch(e){ cloudErr = "Couldn't reach the cloud. Try again in a moment."; if(tab==="account") renderPanel(); return; }
+  if(!S){   // start screen: open the account's company if it has one
+    if(remote?.data){ loadSaveAndReload(remote.data); return; }
+    cloudSynced = true; renderStartAuth(); return;   // the new company will be saved to this account
+
+  }
+  if(!remote?.data){ cloudSynced = true; cloudPush(true); toast("Signed in. Your company is now saved to your account."); return; }
+  if(S.cloudUid === u.uid){
+    // Same account as before: whichever copy is newer wins.
+    if((remote.savedAt||0) > localBase + 1000){ loadSaveAndReload(remote.data); return; }
+    cloudSynced = true; cloudPush(true); if(tab==="account") renderPanel(); return;
+  }
+  askWhichSave(remote);   // this device has a different company than the account
+}
+function askWhichSave(remote){
+  document.querySelectorAll(".overlay").forEach(o=>o.hidden = true);   // this choice comes first
+  const ov = $("#cloudOv"), when = remote.savedAt ? new Date(remote.savedAt).toLocaleString("en-US", {month:"short", day:"numeric", hour:"numeric", minute:"2-digit"}) : "earlier";
+  $("#cloudBody").innerHTML = `<p class="hint" style="color:var(--ink)">Your account already has a company saved. Which one do you want to keep playing?</p>
+    <div class="list">
+      <button class="card" data-pick="cloud"><div class="row"><b>${esc(remote.company||"Saved company")}</b><span class="num">Level ${remote.level||"?"}</span></div><div class="meta"><span>On your account</span><span class="num">${money(remote.cash||0)}</span><span>saved ${esc(when)}</span></div></button>
+      <button class="card" data-pick="local"><div class="row"><b>${esc(S.company)}</b><span class="num">Level ${level()}</span></div><div class="meta"><span>On this device</span><span class="num">${money(S.cash)}</span></div></button>
+    </div>
+    <p class="hint">The one you don't pick is replaced.</p>`;
+  ov.hidden = false;
+  ov.querySelectorAll("[data-pick]").forEach(b=>b.onclick = ()=>{
+    ov.hidden = true;
+    if(b.dataset.pick==="cloud") loadSaveAndReload(remote.data);
+    else { cloudSynced = true; cloudPush(true); toast("This device's company is now saved to your account."); }
+  });
+}
+window.addEventListener("cloud-auth", e=>onCloudAuth(e.detail));
+setInterval(()=>cloudPush(false), 60e3);
+document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="hidden") cloudPush(true); });
+
+const authError = e => ({"auth/invalid-credential":"Wrong email or password.", "auth/wrong-password":"Wrong email or password.", "auth/user-not-found":"No account with that email.",
+  "auth/email-already-in-use":"That email already has an account. Sign in instead.", "auth/weak-password":"Use a password of at least 6 characters.",
+  "auth/invalid-email":"That email address doesn't look right.", "auth/too-many-requests":"Too many tries. Wait a minute and try again.",
+  "auth/network-request-failed":"No connection. Check your internet and try again."})[e?.code] || "Something went wrong. Try again.";
+// Shared sign-in form (Account page and start screen). prefix keeps the element ids unique.
+function authForm(prefix){
+  return `<label class="fld">Email<input type="email" id="${prefix}Email" autocomplete="email" inputmode="email" value="${esc(authEmail)}"></label>
+    <label class="fld">Password<input type="password" id="${prefix}Pw" autocomplete="current-password" minlength="6"></label>
+    ${cloudMsg?`<p class="ok" style="margin:0">${esc(cloudMsg)}</p>`:""}${cloudErr?`<p class="need" style="margin:0">${esc(cloudErr)}</p>`:""}
+    <div class="btnrow"><button type="button" class="btn sm" data-auth="in" data-p="${prefix}">Sign in</button><button type="button" class="btn ghost sm" data-auth="up" data-p="${prefix}">Create account</button><button type="button" class="btn ghost sm" data-auth="reset" data-p="${prefix}">Forgot password</button></div>`;
+}
+async function doAuth(kind, prefix){
+  const email = ($("#"+prefix+"Email")?.value||"").trim(), pw = $("#"+prefix+"Pw")?.value||""; authEmail = email;
+  cloudMsg = ""; cloudErr = "";
+  if(!window.Cloud){ cloudErr = "Sign-in is still loading. Try again in a moment."; return refreshAuthViews(); }
+  if(!email){ cloudErr = "Enter your email."; return refreshAuthViews(); }
+  try{
+    if(kind==="reset"){ await window.Cloud.reset(email); cloudMsg = "Password reset email sent. Check your inbox."; }
+    else if(!pw){ cloudErr = "Enter your password."; }
+    else if(kind==="up") await window.Cloud.signUp(email, pw);
+    else await window.Cloud.signIn(email, pw);
+  }catch(e){ cloudErr = authError(e); }
+  refreshAuthViews();
+}
+function refreshAuthViews(){ if(S && tab==="account") renderPanel(); renderStartAuth(); }
+document.addEventListener("click", e=>{ const b = e.target.closest("[data-auth]"); if(b){ e.preventDefault(); doAuth(b.dataset.auth, b.dataset.p); } });
+function renderStartAuth(){
+  const box = $("#startAuth"); if(!box || S) return;
+  const u = cloudUser();
+  box.innerHTML = u ? `<p class="hint" style="color:var(--ink)">Signed in as <b>${esc(u.email)}</b>. No company on this account yet, so start one below and it will be saved to your account.</p>`
+    : `<details ${cloudErr||cloudMsg?"open":""}><summary>Already playing on another device? <b>Sign in</b></summary>${authForm("st")}</details>`;
+}
+function renderAccount(){
+  const u = cloudUser();
+  if(!window.Cloud) return `<section class="sec"><h2>Account</h2><p class="hint">Sign-in is loading…</p></section>`;
+  if(!u) return `<section class="sec"><h2>Account</h2><p class="hint">Sign in to save your company to your account and play it on your phone, iPad and computer. Without an account, your game is saved in this browser only.</p>
+    ${authForm("ac")}<p class="hint">New here? Enter an email and a password (6+ characters) and tap <b>Create account</b>. Your current company comes with you.</p></section>`;
+  const ago = cloudLast ? dur(Date.now()-cloudLast)+" ago" : cloudSynced ? "saving…" : "checking…";
+  return `<section class="sec"><h2>Account</h2>
+    <table class="spec"><tbody><tr><td>Signed in as</td><td style="font-family:var(--body)">${esc(u.email)}</td></tr><tr><td>Last cloud save</td><td>${ago}</td></tr></tbody></table>
+    ${cloudErr?`<p class="need">${esc(cloudErr)}</p>`:""}
+    <p class="hint">Your company saves to your account about once a minute and when you leave the game. Open the game on another device and sign in with the same email to keep playing there. Play on one device at a time; the most recent save wins.</p>
+    <div class="btnrow"><button class="btn sm" data-act="cloudSave" ${cloudSynced?"":"disabled"}>Save now</button><button class="btn ghost sm" data-act="signOut">Sign out</button></div></section>`;
+}
+
 /* ---------------- Save / load ---------------- */
 // Saves from before multi-load trips kept one job per trip; convert them.
 function migrateTrip(tr){
@@ -1971,7 +2083,7 @@ function migrateTrip(tr){
     loads:[{job:j, picked: S.clock>=tr.segs[1].t1, delivered: !!tr.delivered, cut: tr.cut||0}]};
 }
 function syncClock(){ const now=Date.now(); S.clock += (now-S.lastReal)*S.speed; S.lastReal = now; }
-function save(){ if(!S) return; try{ localStorage.setItem(KEY, JSON.stringify(S, (k,v)=>k==="cum"?undefined:v)); }catch(_){} }
+function save(){ if(!S || reloading) return; cloudDirty = true; try{ localStorage.setItem(KEY, JSON.stringify(S, (k,v)=>k==="cum"?undefined:v)); }catch(_){} }
 function afterLoad(){ drawBases(); drawJobs(); drawYards(); setTab(tab); }
 function showAway(log){
   if(!log || (log.jobs===0 && log.ms<120000)) return;
@@ -1995,7 +2107,7 @@ function start(){
   let loaded = null;
   try{ const raw = localStorage.getItem(KEY); if(raw) loaded = JSON.parse(raw); }catch(_){}
   if(loaded && loaded.v===2){
-    S = loaded;
+    S = loaded; localBase = S.savedAt || 0;
     S.jobs = S.jobs.filter(j=>!j.chain); delete S.chains;
     (S.trips||[]).forEach(t=>(t.loads||[]).forEach(l=>{ delete l.job.chain; }));
     S.trips = S.trips.map(migrateTrip); S.trips.forEach(pruneLoads); S.vehicles.forEach(v=>{ delete v.ret; v.busy = !!tripOf(v); });
