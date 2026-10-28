@@ -2175,11 +2175,11 @@ function renderAlliance(){
       <div class="meta"><span class="num">${c.delivered.toLocaleString("en-US")} / ${c.target.toLocaleString("en-US")} loads</span><span>You: <b class="num">${mine}</b>${alQueue?` (+${alQueue} sending)`:""}</span><span>${left>0?`ends in ${longDur(left)}`:"time's up"}</span></div>
       <p class="hint" style="margin:0">When it's done, you get ${money(c.bonus)} for each load you delivered and the alliance gets ${c.xp} XP. Miss the deadline and there's no bonus.</p></div>`;
   } else {
-    h += `<p class="hint">No contract running. ${lead?"Pick one to start. Targets grow with the number of members.":"The leader starts the next one."}</p>`;
-    if(lead) h += `<div class="list">${AL_CONTRACTS.map(o=>{ const t = alTarget(o, n), poor = o.cost > (a.bank||0);
+    h += `<p class="hint">No contract running. Any member can start one. Targets grow with the number of members.</p>`;
+    h += `<div class="list">${AL_CONTRACTS.map(o=>{ const t = alTarget(o, n), poor = o.cost > (a.bank||0), leaderOnly = o.cost && !lead;
       return `<div class="card"><div class="row"><b>${esc(o.n)}</b><span class="pay">${money(o.bonus)} per load</span></div><p class="hint" style="margin:0">${esc(o.blurb)}</p>
         <div class="meta"><span class="num">${t} loads</span><span class="num">${o.hours} h</span><span>+${o.xp} alliance XP</span>${o.cost?`<span class="num">costs ${money(o.cost)} from the bank</span>`:""}</div>
-        <div class="btnrow"><button class="btn sm" data-act="alStart" data-id="${o.id}" ${alBusy||poor?"disabled":""}>${poor?"Not enough in the bank":"Start contract"}</button></div></div>`; }).join("")}</div>`;
+        <div class="btnrow">${leaderOnly?`<span class="lock">Only the leader can start this one</span>`:`<button class="btn sm" data-act="alStart" data-id="${o.id}" ${alBusy||poor?"disabled":""}>${poor?"Not enough in the bank":"Start contract"}</button>`}</div></div>`; }).join("")}</div>`;
   }
   // Rewards to claim from finished contracts
   const claim = AL.contracts.filter(x=>x.status==="done" && (x.contributions?.[me]||0) > 0 && !x.claimed?.[me]);
@@ -2217,6 +2217,7 @@ function alAct(a, id, el){
   }
   if(a==="alJoin"){ alDo(async ()=>{ await C.join(id, alInfo()); S.alliance = id; save(); cloudPush(true); alSync(); }, "Welcome to the alliance!"); return true; }
   if(a==="alStart"){ const o = AL_CONTRACTS.find(x=>x.id===id), n = AL.members.length||1;
+    if(!o || (o.cost && AL.alliance.leader!==alMe())) return true;   // paid contracts spend the bank: leader only
     alDo(()=>C.start(S.alliance, {kind:o.id, n:o.n, blurb:o.blurb, cargo:o.cargo, target:alTarget(o,n), bonus:o.bonus, xp:o.xp, cost:o.cost, deadline:Date.now()+o.hours*3600e3}, S.company)); return true; }
   if(a==="alClaim"){ alDo(async ()=>{ const x = AL.contracts.find(c=>c.id===id), n = await C.claim(S.alliance, id);
       if(n && x){ const pay = n*x.bonus; S.cash += pay; S.earned += pay; logEvent(`Alliance contract <b>${esc(x.n)}</b>: claimed <span class="num">+${money(pay)}</span>`); toast(`Claimed <span class="num">${money(pay)}</span> for ${n} alliance loads`); save(); } }); return true; }
