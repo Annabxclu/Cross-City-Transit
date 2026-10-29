@@ -52,7 +52,8 @@ const basePt = b => b.pt || cityPt(b.city);
 
 /* ---------------- Road routing (OSRM) ---------------- */
 const routeCache = new Map();
-let routeQueue = Promise.resolve();
+// Road (OSRM) and rail (BRouter) lookups wait in separate lines so a slow rail server never holds up truck jobs.
+let routeQueue = Promise.resolve(), railQueue = Promise.resolve(), roadPending = 0, railPending = 0;
 const rkey = (a,b) => `${a.lat.toFixed(4)},${a.lon.toFixed(4)};${b.lat.toFixed(4)},${b.lon.toFixed(4)}`;
 function thin(coords, max){
   if(coords.length<=max) return coords;
@@ -63,6 +64,7 @@ function thin(coords, max){
 function getRoute(a, b){
   const k = rkey(a,b);
   if(routeCache.has(k)) return routeCache.get(k);
+  roadPending++;
   const p = routeQueue.then(async () => {
     try{
       const ctl = new AbortController(); const timer = setTimeout(()=>ctl.abort(), 9000);
@@ -75,7 +77,7 @@ function getRoute(a, b){
       const wp = js.waypoints||[];
       return {mi: r.distance/1609.34, sec: r.duration, path: coords, names: wp.map(w=>w.name||""), locs: wp.map(w=>({lat:w.location[1], lon:w.location[0]}))};
     }catch(e){ routeCache.delete(k); return null; }
-    finally{ await new Promise(r=>setTimeout(r, 700)); }  // be polite to the shared demo server
+    finally{ roadPending--; await new Promise(r=>setTimeout(r, 700)); }  // be polite to the shared demo server
   });
   routeQueue = p.catch(()=>{});
   routeCache.set(k, p);
@@ -84,7 +86,8 @@ function getRoute(a, b){
 function getRailRoute(a, b){
   const k = "rail|"+rkey(a,b);
   if(routeCache.has(k)) return routeCache.get(k);
-  const p = routeQueue.then(async () => {
+  railPending++;
+  const p = railQueue.then(async () => {
     try{
       const ctl = new AbortController(); const timer = setTimeout(()=>ctl.abort(), 15000);
       const res = await fetch(`${RAIL_ROUTER}?lonlats=${a.lon},${a.lat}|${b.lon},${b.lat}&profile=rail&alternativeidx=0&format=geojson`, {signal:ctl.signal});
@@ -93,9 +96,9 @@ function getRailRoute(a, b){
       const f = (await res.json()).features?.[0]; if(!f) throw new Error("no route");
       return {mi: (+f.properties["track-length"])/1609.34, path: thin(f.geometry.coordinates.map(c=>[+c[1].toFixed(5), +c[0].toFixed(5)]), 800)};
     }catch(e){ routeCache.delete(k); return null; }
-    finally{ await new Promise(r=>setTimeout(r, 1000)); }
+    finally{ railPending--; await new Promise(r=>setTimeout(r, 1000)); }
   });
-  routeQueue = p.catch(()=>{});
+  railQueue = p.catch(()=>{});
   routeCache.set(k, p);
   return p;
 }
@@ -490,9 +493,11 @@ function dispatch(j, v, viaDispatcher){
 // still drawn as a straight dashed placeholder: trip legs in progress and jobs on the board.
 function retryRoutes(){
   if(!S || simulating) return;
-  S.trips.forEach(roadTrip);
+  // Only top up when the lines are nearly empty; otherwise retries pile up and new jobs wait minutes for a route.
+  if(roadPending <= 2 && railPending <= 1) S.trips.forEach(roadTrip);
   for(const j of S.jobs){
     if(j.air || j.path || j.routing || (j.routeTries||0) >= 6) continue;
+    if(j.rail ? railPending > 1 : roadPending > 2) continue;
     j.routeTries = (j.routeTries||0) + 1; j.routed = false; routeJob(j);
   }
 }
@@ -1324,7 +1329,7 @@ function dispatchCard(j){
       </select>
       ${sel ? (o=>{ const p=o.r.plan; return `<div class="opt chosen"><span><b>${esc(o.v.n)}</b> · ${esc(TYPE[o.v.type].n)}<small>${esc(o.r.drivers.map(d=>d.name).join(" + "))} · ${p.adding?`<b>Adds to its current trip</b> (${p.loads} loads, ${capText(o.v, j)}) · `:""}${p.dead>1?`${p.dead} mi to ${isTrain(o.v)?"the pickup yard":isPlane(o.v)?"the pickup airport":"pickup"} · `:""}${p.adding?"":`loading ${dur(p.ld)} · ${isPlane(o.v)?"flight":"drive"} ${dur(p.tHaul)} · unloading ${dur(p.lu)}<br>`}Delivers this load in ${dur(p.deliverIn)}, back at ${isTrain(o.v)?"its yard":isPlane(o.v)?"its home airport":"the hub"} in ${dur(p.total)}${p.adding&&p.extra>0?` (+${dur(p.extra)})`:""}</small></span><span class="pay" title="Job pay">${money(Math.round(j.pay*p.bonus*(1-p.cut)))}</span></div>`; })(sel) : `<p class="hint" style="margin:0">Pick a vehicle to see its timing, then dispatch.</p>`}
       ${sel ? extraLoadsList(j, sel.v) : ""}
-      <div class="btnrow"><button class="btn" data-act="go" data-id="${j.id}" ${j.routing||!sel?"disabled":""}>${j.routing?"Finding route…":extraSel.size?`Dispatch ${extraSel.size+1} loads · ${money(j.pay+[...extraSel].reduce((n,id)=>n+(S.jobs.find(x=>x.id===id)?.pay||0),0))}`:"Dispatch"}</button><button class="btn ghost" data-act="unsel">Close</button></div>`;
+      ${j.routing&&sel?`<p class="hint" style="margin:0">Still looking up the ${j.rail?"track":"road"} route. You can dispatch now; pay uses the estimated ${j.miles} mi.</p>`:""}<div class="btnrow"><button class="btn" data-act="go" data-id="${j.id}" ${!sel?"disabled":""}>${extraSel.size?`Dispatch ${extraSel.size+1} loads · ${money(j.pay+[...extraSel].reduce((n,id)=>n+(S.jobs.find(x=>x.id===id)?.pay||0),0))}`:"Dispatch"}</button><button class="btn ghost" data-act="unsel">Close</button></div>`;
   } else {
     opts = `<p class="need" style="font-size:13px;margin:0">${esc(st.why)}</p><div class="btnrow"><button class="btn ghost" data-act="unsel">Close</button>${st.soon?"":`<button class="btn ghost" data-act="tab" data-tab="shop">Open shop</button>`}</div>`;
   }
